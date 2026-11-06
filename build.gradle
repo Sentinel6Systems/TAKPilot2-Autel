@@ -2,16 +2,8 @@
 buildscript {
     ext.kotlin_version = '1.7.20'
     repositories {
+        google()
         mavenCentral()
-        maven { url 'https://maven.aliyun.com/repository/public/' }
-        maven { url 'https://maven.aliyun.com/repository/central/' }
-        maven { url 'https://maven.aliyun.com/repository/google/' }
-        maven { url 'https://maven.aliyun.com/repository/gradle-plugin/' }
-        mavenCentral()
-        maven {
-            url "https://maven.google.com"
-        }
-        maven { url "https://jitpack.io" }
     }
     dependencies {
         //*/
@@ -21,25 +13,19 @@ buildscript {
         //*/
 //        classpath 'me.vigi:fat-aar-plugin:0.2.8'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.20"
-        classpath 'com.github.kezong:fat-aar:1.3.6'
-        classpath 'org.jfrog.buildinfo:build-info-extractor-gradle:4.4.18'
 //        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
     }
 }
 
+// The sample's publishing plugins (Artifactory, fat-aar) and its regional Maven mirrors are not
+// used to build this app. Google and Maven Central come first: a mirror that answers with a
+// server error stops dependency resolution outright instead of falling through to the next one.
 allprojects {
-    apply plugin: "com.jfrog.artifactory"
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/public/' }
-        maven { url 'https://maven.aliyun.com/repository/central/' }
-        maven { url 'https://maven.aliyun.com/repository/google/' }
-        maven { url 'https://maven.aliyun.com/repository/gradle-plugin/' }
+        google()
         mavenCentral()
-        maven {
-            url 'https://maven.google.com'
-        }
         maven { url "https://jitpack.io" }
     }
 }
