@@ -1,24 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pilot Field Guide. Deliberately just a scroll container: every section is built in
-     FieldGuideActivity so the icon examples can be REAL toolbar views (BatteryGaugeView,
-     SignalBarsView, LiveToggleView, the TAK badge with its status dot...) driven into the
-     states being described, rather than hand-drawn mock-ups that would quietly go stale the
-     next time an icon changes. Styling matches the Pre-Flight Setup screen. -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/fieldGuideScroll"
+<!-- Pilot Field Guide: A LEFT RAIL AND ONE TAB AT A TIME (design decision), the same shape as
+     Pre-Flight Setup. The guide was one page of six numbered sections.
+
+     Both sides are built in FieldGuideActivity: the rail from GuideTab, and the text so the
+     icon examples can be REAL toolbar views (BatteryGaugeView, SignalBarsView, LiveToggleView,
+     the TAK badge with its status dot...) driven into the states being described, rather than
+     hand-drawn mock-ups that would quietly go stale the next time an icon changes. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#1A1A1A"
-    android:fillViewport="true">
+    android:orientation="horizontal"
+    android:baselineAligned="false"
+    android:background="@color/tp_bg_screen">
 
-    <!-- blocksDescendants: several of the icon examples are real toolbar widgets that are
-         focusable in their normal home, and on open the ScrollView would jump down to the first
-         one of them instead of starting at the top of the guide. -->
-    <LinearLayout
-        android:id="@+id/fieldGuideContent"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:descendantFocusability="blocksDescendants"
-        android:orientation="vertical"
-        android:padding="24dp" />
-</ScrollView>
+    <!-- The rail is longer than the panel is high, so it scrolls. -->
+    <ScrollView
+        android:layout_width="@dimen/preflight_rail_width"
+        android:layout_height="match_parent"
+        android:background="@color/tp_rail_bg">
+
+        <LinearLayout
+            android:id="@+id/fieldGuideRail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- The edge of the rail, so the rail does not read as part of the page. -->
+    <View
+        android:layout_width="@dimen/preflight_rail_edge"
+        android:layout_height="match_parent"
+        android:background="@color/tp_rail_edge" />
+
+    <ScrollView
+        android:id="@+id/fieldGuideScroll"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <!-- blocksDescendants: several of the icon examples are real toolbar widgets that are
+             focusable in their normal home, and on open the ScrollView would jump down to the
+             first one of them instead of starting at the top of the tab. -->
+        <LinearLayout
+            android:id="@+id/fieldGuideContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:descendantFocusability="blocksDescendants"
+            android:orientation="vertical"
+            android:padding="24dp" />
+    </ScrollView>
+</LinearLayout>

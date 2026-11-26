@@ -89,7 +89,7 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
     private lateinit var irButton: TextView
     private lateinit var irPaletteButton: TextView
     /** The ⤢ / ⤡ on the thermal window's corner — see [renderPipSizeButton]. */
-    private lateinit var pipSizeButton: android.widget.ImageButton
+    private lateinit var pipButton: TextView
     private lateinit var emergencyBroadcastBanner: TextView
     /** The whole video frame's rect in view space, as last handed to the AR overlay. */
     private var lastVideoRect: android.graphics.RectF? = null
@@ -419,10 +419,10 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         irPaletteButton = findViewById(R.id.flightIrPaletteButton)
         irButton.setOnClickListener { onIrTapped() }
         irPaletteButton.setOnClickListener { onIrPaletteTapped() }
-        pipSizeButton = findViewById(R.id.flightPipSizeButton)
-        pipSizeButton.setOnClickListener {
-            val target = cameraView.maximised ?: return@setOnClickListener
-            AppLog.v(TAG, "tap: PIP size control -> $target")
+        pipButton = findViewById(R.id.flightPipButton)
+        pipButton.setOnClickListener {
+            val target = cameraView.pipTarget ?: return@setOnClickListener
+            AppLog.v(TAG, "tap: PIP -> $target")
             selectCameraView(target)
         }
         emergencyBroadcastBanner = findViewById(R.id.flightEmergencyBroadcastBanner)
@@ -526,10 +526,14 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         // things that ever move the camera are updateHud()'s recenter and the zoom toggle.
         mapWide = getSharedPreferences("takpilot2_tak", MODE_PRIVATE)
             .getBoolean(KEY_MAP_WIDE, true)
-        // OpenStreetMap, fixed. There is no setting to choose a source or pre-download an
-        // area (design decision). Tiles still cache as
-        // they are viewed, and osmdroid trims that store itself — see MapTileCache.configure.
-        map.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+        // The pilot's Map Display choice from Pre-Flight: Street, Hybrid or Custom (design
+        // decision; it replaced a fixed OpenStreetMap). Tiles cache as they are
+        // viewed, and osmdroid trims that store itself — see MapTileCache.configure. Applied
+        // again in onResume if the choice changed while Pre-Flight was open.
+        // The provider reads the OFFLINE MAP of a Custom address first (SavedMapTiles): with no
+        // network the saved tiles are the map. It is set before the source, once.
+        map.setTileProvider(SavedMapTiles.provider(this))
+        applyMapSource()
         map.setMultiTouchControls(false)
         map.setBuiltInZoomControls(false)
         map.setFlingEnabled(false)
@@ -702,7 +706,7 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         }
 
         crosshairView.onReticleTap = { onQuickMarkerAction("tap: reticle") }
-        crosshairView.onReticleLongPress = { onUnknownMarkerAction("long-press: reticle") }
+        crosshairView.onReticleLongPress = { onStaticMarkerAction("long-press: reticle") }
 
         VideoStreamerHolder.onStateChanged = Runnable { refreshStreamToggle() }
         refreshStreamToggle()
@@ -808,9 +812,21 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         if (hasFocus) goFullScreen()
     }
 
+    /** The map source now on the small map, from [MapSource.effective]. */
+    private var appliedMapSource: String? = null
+
+    /** Puts the saved Map Display choice on the small map, when it is not there already. */
+    private fun applyMapSource() {
+        val want = MapSource.effective(MapSource.savedChoice(this), MapSource.savedCustomUrl(this))
+        if (want == appliedMapSource) return
+        MapSourceTiles.apply(this, map, want)
+        appliedMapSource = want
+    }
+
     override fun onResume() {
         super.onResume()
         AppLog.v(TAG, "onResume")
+        applyMapSource()
         AutelProductHolder.install()   // reclaim the global product listener (see holder docs)
         AutelProductHolder.addCameraReadyListener(cameraReadyObserver)
         AutelProductHolder.addListener(connectionObserver)
@@ -941,7 +957,8 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
                         // SDK thread — everything below shows toasts and touches views.
                         when (e.name) {
                             // C2: markers, MIRRORING the crosshair exactly — short re-aims the one
-                            // quick marker, long drops a NEW stationary Unknown marker. Same idiom
+                            // quick marker, long drops a NEW stationary marker of the type the
+                            // pilot chooses. Same idiom
                             // as C1 and the IR buttons: a pilot who has learned the on-screen
                             // control has learned the button, and both routes end in the SAME
                             // function, thus the two can never drift apart. The SDK gives short
@@ -949,7 +966,7 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
                             "CUSTOM_BUTTON_SHORT_$QUICK_MARKER_BUTTON" ->
                                 runOnUiThread { onQuickMarkerAction("controller C2 short") }
                             "CUSTOM_BUTTON_LONG_$QUICK_MARKER_BUTTON" ->
-                                runOnUiThread { onUnknownMarkerAction("controller C2 long") }
+                                runOnUiThread { onStaticMarkerAction("controller C2 long") }
 
                             // C1: thermal, MIRRORING the on-screen IR buttons exactly — short
                             // changes the camera between visible and thermal, long changes the
@@ -1281,7 +1298,10 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         if (AutelProductHolder.photoFailedFlag) {
             AutelProductHolder.photoFailedFlag = false
             AutelProductHolder.photoTakenFlag = false
-            showNotice("The photo did not save", refused = true)
+            // The card is named when it is the reason (StorageRefusalPolicy).
+            val card = StorageRefusalPolicy.reason(AutelProductHolder.sdCardState?.name)
+            showNotice(if (card != null) "The photo did not save: $card" else "The photo did not save",
+                refused = true)
         } else if (AutelProductHolder.photoTakenFlag) {
             AutelProductHolder.photoTakenFlag = false
             showNotice("Photo Saved")
@@ -1550,9 +1570,9 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
             // — and there is one mirror, which every screen and the boot step call.
             // The slot is the source; the plain key is written as
             // well so a restart below reads the new value at once.
-            val slot = if (prefs.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 1) == 2) 2 else 1
+            val slot = if (prefs.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 1) == 2) 2 else 1
             prefs.edit()
-                .putString(VideoServersActivity.vKey(slot, "profile"), chosen.prefValue)
+                .putString(VideoServersPanel.vKey(slot, "profile"), chosen.prefValue)
                 .putString("video_profile", chosen.prefValue)
                 .apply()
             AppLog.i(TAG, "video quality -> ${chosen.label}")
@@ -2229,7 +2249,7 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
      * removes it for the old reason. The old split gave ONE marker two verbs. This
      * one gives two different KINDS of marker one verb each:
      *   SHORT — this function. The one quick marker, re-aimed at whatever the camera looks at.
-     *   LONG  — [onUnknownMarkerAction]. A NEW stationary Unknown marker, numbered, that stays.
+     *   LONG  — [onStaticMarkerAction]. A NEW stationary marker, numbered, that stays.
      * The old wrong-gesture scolding cannot come back, because neither gesture refuses. They give
      * different results, and both are useful.
      *
@@ -2260,41 +2280,49 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
     }
 
     /**
-     * Drop a NEW stationary marker of the type Unknown at the look point, and send it immediately.
+     * Drop a NEW stationary marker at the look point: the pilot chooses the type, then it is sent
+     * immediately.
      *
-     * This is a SHORTCUT for the marker button plus "Unknown" in the type list, and nothing more.
      * The same name from the same shared counter ("<callsign>-NN"), the same entry in the markers
      * list, the same 60-second re-broadcast that catches a teammate whose ATAK connects late. It
      * is NOT the quick marker: it stays where it is put, and a second long press makes a second
      * marker.
      *
-     * It sends with no Send / Do not Send question (design decision). This gesture is for the
-     * moment when the pilot cannot give a dialog any attention. The marker button keeps the
-     * question, because there the pilot has already stopped to choose.
+     * The type list opens first (design decision). This gesture once placed an Unknown marker
+     * with no list, for the moment when the pilot cannot give a dialog any attention; the type
+     * is now chosen here too.
+     *
+     * ⚠ THE POSITION IS THE ONE AT THE PRESS, NOT THE ONE AT THE CHOICE (design decision).
+     * The pilot holds the crosshair on the thing to mark; while the list is open the aircraft and
+     * the gimbal keep moving. The marker button reads the point again after its list, because a
+     * tap on that button does not aim at anything. The gate is checked at the press only, for the
+     * same reason: the point it passed is the point that is placed.
+     *
+     * It sends with no Send / Do not Send question (design decision). The marker button keeps
+     * the question. Cancel places nothing and uses no number from the counter.
      *
      * The same gate as each other drop route: an aim that the marker button refuses must be
      * refused here too, or the controller button becomes a quiet way around it.
      *
      * @param source only for the log, so a press can be traced back to the control that sent it.
      */
-    private fun onUnknownMarkerAction(source: String) {
-        AppLog.v(TAG, "$source: Unknown marker")
+    private fun onStaticMarkerAction(source: String) {
+        AppLog.v(TAG, "$source: static marker")
         if (aimTooPoorToDrop()) { refuseDropForAim(); return }
-        // Read the look-point HERE. The aircraft keeps flying, thus a position captured when the
-        // press started is already old.
         val look = TakBridgeHolder.lookPoint()
         if (look == null) {
-            AppLog.w(TAG, "Unknown marker refused — no look point (GPS/gimbal not ready)")
+            AppLog.w(TAG, "static marker refused — no look point (GPS/gimbal not ready)")
             toast("Cannot place the marker yet. Wait for GPS and the gimbal.")
             return
         }
         val (lat, lon, elev) = look
-        val name = TakDropMarkers.placeAt(
-            TakDropMarkers.Affiliation.UNKNOWN, lat, lon, elev, autoSend = true)
-        // The notice reports the DROP and the toast from sendPin reports the SEND. Both are shown
-        // on purpose: the send can fail on its own ("not connected to TAK"), and one message for
-        // the two facts would hide the second.
-        showNotice("$name dropped")
+        pickAffiliationThen { aff ->
+            val name = TakDropMarkers.placeAt(aff, lat, lon, elev, autoSend = true)
+            // The notice reports the DROP and the toast from sendPin reports the SEND. Both are
+            // shown on purpose: the send can fail on its own ("not connected to TAK"), and one
+            // message for the two facts would hide the second.
+            showNotice("$name dropped")
+        }
     }
 
     /**
@@ -2471,13 +2499,14 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
     }
 
     /**
-     * Switches the FPV between the visible camera and the 640T's thermal sensor.
+     * Switches the FPV between the visible (RGB) camera and the 640T's thermal sensor.
      *
-     * A tap TOGGLES visible and PIP, on the pill and on the C1 key alike, and from full
-     * thermal goes back to PIP (design decision). Two other shapes were tried and
-     * rejected: a long-press menu, then a three-step cycle, "a chore".
-     * Full thermal is reached from the ⤢ on the window's corner, the phone idiom —
-     * see [renderPipSizeButton]. [selectCameraView] owns the write, the belief and the verify.
+     * A tap of the IR pill TOGGLES RGB and full-screen IR, on the pill and on the C1 key alike,
+     * and from PIP goes back to RGB (design decision). PIP is reached from the
+     * PIP pill, which shows only while thermal is on screen — see [renderPipButton]. This
+     * replaced an earlier visible ↔ PIP toggle and an expand / contract pill; other
+     * shapes (a long-press menu, a three-step cycle) were tried and rejected.
+     * [selectCameraView] owns the write, the belief and the verify.
      *
      * ⚠ **THE CAMERA WILL NOT CHANGE LENS WHILE IT IS RECORDING, AND IT SAYS `OK` ANYWAY**
      * (measured in flight). A success callback is not evidence: the assumption "if the camera
@@ -2659,14 +2688,6 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
     }
 
     /**
-     * The thermal expand / contract PILL (design decision): a pill in the actions column
-     * directly under the PIP pill, shown only while thermal is on screen. In PIP its icon
-     * makes thermal full screen; in full thermal it puts the window back. Gone in visible and
-     * the column closes up. Five placements ON the picture were tried and rejected; the pill
-     * is where the thumb already is. [PipWindowGeometry] still records where the
-     * camera draws the window.
-     */
-    /**
      * The blend slider follows the camera's own value into the pilot's hand, and is SHOWN ONLY
      * IN PIP (design decision).
      *
@@ -2709,25 +2730,31 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         }
     }
 
-    private fun renderPipSizeButton() {
-        if (!::pipSizeButton.isInitialized) return
-        val target = cameraView.maximised
-        if (target == null) { pipSizeButton.visibility = View.GONE; return }
-        pipSizeButton.setImageResource(
-            if (cameraView == CameraView.PIP) R.drawable.ic_pip_expand else R.drawable.ic_pip_collapse)
-        pipSizeButton.visibility = View.VISIBLE
+    /**
+     * The PIP PILL (design decision): in the actions column directly under the
+     * IR pill, shown only while thermal is on screen. From full IR a tap enters PIP; in PIP it
+     * is lit and a tap goes back to full IR. Gone in RGB, and the column closes up.
+     * [PipWindowGeometry] still records where the camera draws the window.
+     */
+    private fun renderPipButton() {
+        if (!::pipButton.isInitialized) return
+        if (cameraView.pipTarget == null) { pipButton.visibility = View.GONE; return }
+        paintPill(pipButton, cameraView.pipLit)
+        pipButton.visibility = View.VISIBLE
     }
 
-    /** IR pill lit when the thermal sensor is on screen (thermal or PIP), labelled with the
-     *  view like the zoom pill is labelled with its level; palette button shown only then. */
+    /** A text pill lit green or plain — the same look as AR. */
+    private fun paintPill(pill: TextView, lit: Boolean) {
+        pill.setBackgroundResource(if (lit) R.drawable.bg_pill_active else R.drawable.bg_zoom_pill)
+        pill.setTextColor(if (lit) androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go) else Color.WHITE)
+    }
+
+    /** IR pill lit when the thermal sensor is on screen (full IR or PIP); the PIP pill and the
+     *  palette button shown only then. */
     private fun refreshIrButtons() {
-        renderPipSizeButton()
+        renderPipButton()
         renderBlendSlider()
-        irButton.text = cameraView.label
-        irButton.setBackgroundResource(
-            if (cameraView.active) R.drawable.bg_pill_active else R.drawable.bg_zoom_pill
-        )
-        irButton.setTextColor(if (cameraView.active) androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go) else Color.WHITE)
+        paintPill(irButton, cameraView.irLit)
         irPaletteButton.visibility = if (cameraView.hasThermal) View.VISIBLE else View.GONE
         // Spelled out, not "WHOT"/"BHOT": in the HUD column it has the full column width, and
         // the abbreviations only existed to fit a narrow toolbar pill.
@@ -3170,7 +3197,7 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
         // The ELEVATED account's channels under the Standard's: the whole
         // scope of this aircraft, in flight, on one screen. WRITABLE, the same
         // as the Standard rows above and behind the same lock — see
-        // TakServerActivity.renderVideoChannels for why a tick here is also the only possible
+        // TakServerPanel.renderVideoChannels for why a tick here is also the only possible
         // "ignore incoming" control, and for what it costs every controller on that account.
         // Read once at open: the server's t-x-g-c change notice arrives on the Standard
         // connection only.
@@ -3454,7 +3481,8 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
                 "The camera is recording to its internal memory, not the SD card."
             h.sdCardState != null &&
                 h.sdCardState != com.autel.common.camera.base.SDCardState.CARD_READY ->
-                "The SD card is not ready (${h.sdCardState})."
+                StorageRefusalPolicy.reason(h.sdCardState?.name)?.let { "$it." }
+                    ?: "The SD card is not ready (${h.sdCardState})."
             else -> null
         }
     }
@@ -3995,6 +4023,7 @@ class FlightActivity : AppCompatActivity(), TakDropMarkers.Ui {
             fix.latitude, fix.longitude, hud.lat, hud.lon)
         // Signed relative turn, -180..+180: which way and how far the pilot must rotate.
         fpvAntennaArc.setRelativeBearing(((bearing - facing + 540.0) % 360.0) - 180.0)
+        fpvAntennaArc.setCompassReliable(ControllerCompass.reliable)
     }
 
     private fun updateGimbalPitch(hud: AutelTakBridge.Hud?) {

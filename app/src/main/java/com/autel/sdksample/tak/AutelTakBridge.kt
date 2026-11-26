@@ -196,6 +196,7 @@ class AutelTakBridge(
         running = false
         handler.removeCallbacks(tick)
         if (finalizeFlight) FlightPathLogger.endSession("bridge stopped")
+        SensorTrace.flush()
         unsubscribe()
         // The bridge is the only consumer of the controller's position, so the receiver stops
         // with it. Without this the GPS ran at 2s updates for the LIFE OF THE PROCESS after the
@@ -336,6 +337,9 @@ class AutelTakBridge(
                 airborne = flying
                 FlightPathLogger.onTelemetry(
                     lat, lon, mslAlt, relAlt, speedMs, headingDeg, batteryPct, satCount, flying)
+                // The raw sensor record. It records and changes nothing; it writes only
+                // while the Debug log switch is on. See SensorTrace.
+                SensorTrace.onFlyController(info, relAlt, mode?.name, flying)
                 // Warnings for the flight screen: from the status this callback carries.
                 // Cheap by contract — set compare, log on
                 // change only. `flying` is passed rather than re-read so the warning and the
@@ -426,6 +430,7 @@ class AutelTakBridge(
                 // RAW, unlike pitch above — see liveGimbalRoll for why nothing is normalised
                 // until the sign is measured. getRoll() is on this same interface.
                 liveGimbalRoll = info.roll.toDouble()
+                SensorTrace.onGimbal(info)
                 // Erratic-pitch watch (a full-range oscillation once ran 39 s before the pilot
                 // reacted). Fed here, at the single pitch ingest point —
                 // the monitor owns no listener. Uses the normalised value so the detector

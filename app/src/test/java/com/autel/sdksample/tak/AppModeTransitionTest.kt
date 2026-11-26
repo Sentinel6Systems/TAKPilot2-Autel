@@ -22,19 +22,19 @@ class AppModeTransitionTest {
     @After fun restore() { seams.restore() }
 
     private val chb = TakAutoConnect.KEY_CHB_ENABLED
-    private val slot = VideoServersActivity.KEY_V_ACTIVE_SLOT
-    private val adv1 = VideoServersActivity.vKey(1, "advertise")
-    private val adv2 = VideoServersActivity.vKey(2, "advertise")
+    private val slot = VideoServersPanel.KEY_V_ACTIVE_SLOT
+    private val adv1 = VideoServersPanel.vKey(1, "advertise")
+    private val adv2 = VideoServersPanel.vKey(2, "advertise")
 
     /** A controller as flown in ENHANCED: split on, publishing to Server 2 (which
      *  advertises Server 1 — "other" from slot 2), all three locks set. Everything BASIC mutes. */
     private fun elevated() = FakePrefs(AppMode.ENHANCED).slotsMigrated()
         .put(chb, true)
         .put(slot, 2)
-        .put(adv1, VideoServersActivity.ADV_OTHER)
-        .put(adv2, VideoServersActivity.ADV_SELF)
-        .put(VideoServersActivity.vKey(1, "host"), "one.example.com")
-        .put(VideoServersActivity.vKey(2, "host"), "two.example.com")
+        .put(adv1, VideoServersPanel.ADV_OTHER)
+        .put(adv2, VideoServersPanel.ADV_SELF)
+        .put(VideoServersPanel.vKey(1, "host"), "one.example.com")
+        .put(VideoServersPanel.vKey(2, "host"), "two.example.com")
         .put(TakConnectActivity.KEY_TAK_LOCKED, true)
         .put(TakConnectActivity.KEY_VIDEO_LOCKED, true)
         .put(TakConnectActivity.KEY_BATTERY_LOCKED, true)
@@ -48,7 +48,7 @@ class AppModeTransitionTest {
         assertEquals(AppMode.BASIC, AppMode.of(p))
         assertFalse(p.getBoolean(chb, true))
         assertEquals(1, p.getInt(slot, -1))
-        assertEquals(VideoServersActivity.ADV_OFF, p.getString(adv1, null))
+        assertEquals(VideoServersPanel.ADV_OFF, p.getString(adv1, null))
     }
 
     /** ⚠ The teardown really happens — the broadcast cancelled, THEN the split cleared. */
@@ -117,7 +117,7 @@ class AppModeTransitionTest {
         assertEquals(AppMode.ENHANCED, AppMode.of(p))
         assertTrue(p.getBoolean(chb, false))
         assertEquals(2, p.getInt(slot, -1))
-        assertEquals(VideoServersActivity.ADV_OTHER, p.getString(adv1, null))
+        assertEquals(VideoServersPanel.ADV_OTHER, p.getString(adv1, null))
         assertTrue(redialled)
         assertFalse(p.getBoolean(AppModeTransition.KEY_SNAP_TAKEN, false))
     }
@@ -172,9 +172,9 @@ class AppModeTransitionTest {
     fun `an advertisement chosen while in BASIC survives the return`() {
         val p = elevated()
         AppModeTransition.apply(p, AppMode.BASIC)
-        p.edit().putString(adv1, VideoServersActivity.ADV_SELF).apply()
+        p.edit().putString(adv1, VideoServersPanel.ADV_SELF).apply()
         AppModeTransition.apply(p, AppMode.ENHANCED)
-        assertEquals(VideoServersActivity.ADV_SELF, p.getString(adv1, null))
+        assertEquals(VideoServersPanel.ADV_SELF, p.getString(adv1, null))
     }
 
     @Test
@@ -206,12 +206,12 @@ class AppModeTransitionTest {
         val p = elevated()
         AppModeTransition.apply(p, AppMode.BASIC)
         p.edit().putBoolean(chb, true).putInt(slot, 2)
-            .putString(adv1, VideoServersActivity.ADV_OTHER)
+            .putString(adv1, VideoServersPanel.ADV_OTHER)
             .putBoolean("video_adv_on", true).putString("video_adv_host", "two.example.com").apply()
         AppModeTransition.enforceBasicInvariants(p)
         assertFalse(p.getBoolean(chb, true))
         assertEquals(1, p.getInt(slot, -1))
-        assertEquals(VideoServersActivity.ADV_OFF, p.getString(adv1, null))
+        assertEquals(VideoServersPanel.ADV_OFF, p.getString(adv1, null))
         assertFalse("the plain key must be re-derived by enforceBasicInvariants itself",
             p.getBoolean("video_adv_on", true))
         assertTrue(p.getBoolean(AppModeTransition.KEY_SNAP_CHB_ENABLED, false))
@@ -358,7 +358,7 @@ class AppModeTransitionTest {
     /** ⚠ A publish slot with no host streams nothing, so nothing is advertised. */
     @Test
     fun `a publish slot with no host advertises nothing`() {
-        val p = elevated().put(VideoServersActivity.vKey(2, "host"), "")
+        val p = elevated().put(VideoServersPanel.vKey(2, "host"), "")
         assertNull(AppModeTransition.facts(p, true, AppMode.ENHANCED).advertNow)
     }
 

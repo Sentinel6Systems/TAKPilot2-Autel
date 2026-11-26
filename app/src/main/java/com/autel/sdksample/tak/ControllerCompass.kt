@@ -26,7 +26,27 @@ object ControllerCompass {
     @Volatile private var azimuthMagDeg: Double? = null
     private var sensorManager: SensorManager? = null
     private var listener: SensorEventListener? = null
+    private var fieldListener: SensorEventListener? = null
     private var loggedMissing = false
+
+    // IS THE COMPASS FIT TO USE? (Inside a vehicle the marker can point behind a pilot who
+    // faces the aircraft.) The sensors' own accuracy status and the strength of
+    // the measured field against the Earth's — see compassReliable. Written on the main
+    // thread by the listeners, read on it by the HUD tick.
+    @Volatile private var rotationAccuracy: Int? = null
+    @Volatile private var fieldAccuracy: Int? = null
+    @Volatile private var fieldUt: Double? = null
+    private var expectedFieldUt: Double? = null
+    private var lastReliable = true
+
+    // Declination cache: azimuthTrueDeg() is called from the 2 Hz HUD tick, and building a
+    // GeomagneticField is a real spherical-harmonics computation, not a cheap lookup — done
+    // every 500ms it was work with no payoff, since declination barely moves over a few km.
+    // Rebuilt only when the operator fix has moved past DECLINATION_CACHE_DEG.
+    private var cachedDeclination: Double? = null
+    private var cachedFixLat: Double? = null
+    private var cachedFixLon: Double? = null
+    private const val DECLINATION_CACHE_DEG = 0.01   // ~1.1km at the equator
 
     fun start(context: Context) {
         if (listener != null) return
@@ -53,19 +73,64 @@ object ControllerCompass {
                 SensorManager.getOrientation(remap, orientation)
                 azimuthMagDeg = CameraSlantPoint.norm360(Math.toDegrees(orientation[0].toDouble()))
             }
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+                rotationAccuracy = accuracy
+            }
         }
         sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_UI)
         sensorManager = sm
         listener = l
         AppLog.i(TAG, "rotation-vector sensor armed for antenna aim")
+
+        // The magnetometer itself, slowly (about 5 readings a second): only its field
+        // strength and its accuracy status are used, to judge the heading above.
+        val field = sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) ?: return
+        val f = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                val v = event.values
+                val now = Math.sqrt((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).toDouble())
+                // Smoothed, so one odd reading does not change the colour of the indicator.
+                fieldUt = fieldUt?.let { it + 0.2 * (now - it) } ?: now
+                fieldAccuracy = event.accuracy
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+                fieldAccuracy = accuracy
+            }
+        }
+        sm.registerListener(f, field, SensorManager.SENSOR_DELAY_NORMAL)
+        fieldListener = f
     }
+
+    /**
+     * False when the compass is disturbed or not calibrated: the antenna-aim indicator turns
+     * red. True with no sign of trouble, and true when nothing can be measured. A change is
+     * logged once, with the numbers, so a wrong indicator can be explained after a flight.
+     */
+    val reliable: Boolean
+        get() {
+            val status = listOfNotNull(rotationAccuracy, fieldAccuracy).minOrNull()
+            val now = compassReliable(status, fieldUt, expectedFieldUt, lastReliable)
+            if (now != lastReliable) {
+                lastReliable = now
+                AppLog.i(TAG, "compass ${if (now) "reliable" else "NOT RELIABLE"}: status=$status" +
+                    " field=${fieldUt?.let { "%.0f".format(it) }} uT" +
+                    " expected=${expectedFieldUt?.let { "%.0f".format(it) }} uT" +
+                    " facing=${azimuthMagDeg?.let { "%.0f".format(it) }} mag")
+            }
+            return now
+        }
 
     fun stop() {
         listener?.let { sensorManager?.unregisterListener(it) }
+        fieldListener?.let { sensorManager?.unregisterListener(it) }
         listener = null
+        fieldListener = null
         sensorManager = null
         azimuthMagDeg = null
+        rotationAccuracy = null
+        fieldAccuracy = null
+        fieldUt = null
+        lastReliable = true
     }
 
     /**
@@ -77,9 +142,25 @@ object ControllerCompass {
     fun azimuthTrueDeg(): Double? {
         val mag = azimuthMagDeg ?: return null
         val fix = OperatorLocation.latest ?: return null
-        val declination = GeomagneticField(
-            fix.latitude.toFloat(), fix.longitude.toFloat(),
-            fix.altitude.toFloat(), System.currentTimeMillis()).declination
-        return CameraSlantPoint.norm360(mag + declination)
+        return CameraSlantPoint.norm360(mag + declinationFor(fix))
+    }
+
+    private fun declinationFor(fix: android.location.Location): Double {
+        val lastLat = cachedFixLat
+        val lastLon = cachedFixLon
+        val stale = cachedDeclination == null || lastLat == null || lastLon == null ||
+            Math.abs(fix.latitude - lastLat) > DECLINATION_CACHE_DEG ||
+            Math.abs(fix.longitude - lastLon) > DECLINATION_CACHE_DEG
+        if (stale) {
+            val model = GeomagneticField(
+                fix.latitude.toFloat(), fix.longitude.toFloat(),
+                fix.altitude.toFloat(), System.currentTimeMillis())
+            cachedDeclination = model.declination.toDouble()
+            // The same model gives the strength of the Earth's field here (nanotesla).
+            expectedFieldUt = model.fieldStrength / 1000.0
+            cachedFixLat = fix.latitude
+            cachedFixLon = fix.longitude
+        }
+        return cachedDeclination!!
     }
 }

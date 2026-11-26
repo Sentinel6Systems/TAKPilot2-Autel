@@ -30,19 +30,15 @@ package com.autel.sdksample.tak
 enum class CameraView(
     /** The SDK `DisplayMode` constant name this view is written and read as. */
     val displayModeName: String,
-    /** The pill label. Short, because the pill is 54dp. */
-    val label: String,
     /** The bridge's lens: what the published camera-point cone is based on. */
     val lens: AutelTakBridge.Lens,
 ) {
-    /** The pill reads PIP unlit here: it names what a tap will ADD, the way the zoom pill
-     *  reads the level it is at (design decision). */
-    VISIBLE("VISIBLE", "PIP", AutelTakBridge.Lens.EO),
-    /** Full thermal keeps the PIP label, lit (design decision): the pill is the PIP
-     *  switch, and the thermal-size pill under it says whether the window is maximised. */
-    IR("IR", "PIP", AutelTakBridge.Lens.IR),
-    /** Thermal drawn into the centre of the visible picture, by the camera. */
-    PIP("PICTURE_IN_PICTURE", "PIP", AutelTakBridge.Lens.BLEND);
+    /** The visible (RGB) camera. The IR pill is unlit and the PIP pill is gone. */
+    VISIBLE("VISIBLE", AutelTakBridge.Lens.EO),
+    /** Full-screen thermal. The IR pill is lit and the PIP pill shows, unlit. */
+    IR("IR", AutelTakBridge.Lens.IR),
+    /** Thermal drawn into the centre of the visible picture, by the camera. Both pills lit. */
+    PIP("PICTURE_IN_PICTURE", AutelTakBridge.Lens.BLEND);
 
     /** The thermal sensor is on screen, thus its palette applies. In PIP the palette colours
      *  the centre window (white hot as measured). */
@@ -56,29 +52,36 @@ enum class CameraView(
      *  the 1280x720 composite, measured (`MAX_0004` 1280x720p25). */
     val expectsThermalFrame: Boolean get() = this == IR
 
-    /** The pill is lit (green) when the view is anything but the plain visible camera. */
-    val active: Boolean get() = this != VISIBLE
+    /** The IR pill is lit (green) when the thermal sensor is on screen: full IR or PIP. */
+    val irLit: Boolean get() = hasThermal
 
     /**
-     * The next view on a tap of the IR pill or the C1 key: a TWO-WAY toggle, visible ↔ PIP
-     * (a three-step cycle through all views was tried and found to be a chore). Full thermal is
-     * reached from the maximise control on the PIP window ([maximised]) and a tap from full
-     * thermal goes back to PIP, not to visible.
+     * THE TWO PILLS (design decision). This replaces an earlier PIP pill and
+     * its expand / contract pill (a three-step cycle through all views was also tried and
+     * found to be a chore).
+     *
+     * [next] is the IR pill and the C1 key: a TWO-WAY toggle, RGB ↔ full-screen IR. From PIP
+     * it goes back to RGB: the IR pill turns the thermal camera off, whatever view it is in.
      */
     val next: CameraView get() = when (this) {
-        VISIBLE -> PIP
+        VISIBLE -> IR
+        IR -> VISIBLE
         PIP -> VISIBLE
-        IR -> PIP
     }
 
-    /** The view the PIP window's corner control goes to: ⤢ on the window makes it full
-     *  thermal, ⤡ on full thermal puts the window back. Null in visible, where there is no
-     *  control. */
-    val maximised: CameraView? get() = when (this) {
-        PIP -> IR
+    /**
+     * The view the PIP pill goes to. The pill shows only while the thermal sensor is on
+     * screen: from full IR it enters PIP, and from PIP it goes back to full IR. Null in RGB,
+     * where the pill is gone.
+     */
+    val pipTarget: CameraView? get() = when (this) {
         IR -> PIP
+        PIP -> IR
         VISIBLE -> null
     }
+
+    /** The PIP pill is lit (green) in PIP only. */
+    val pipLit: Boolean get() = this == PIP
 
     companion object {
         /**

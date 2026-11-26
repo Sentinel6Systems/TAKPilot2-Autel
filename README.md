@@ -97,16 +97,23 @@ recognises the 640T V3's camera (which reports itself as `XL726`, a model no pub
 The repository contains no server addresses, certificates or credentials. Everything is set in the
 application and kept on the device.
 
-- **Pre-Flight Setup** holds the aircraft limits, the video quality, the active video server, the
-  DTED terrain tiles and the FAA airspace (UASFM) data, and summarises the TAK connection.
-- **TAK Server** holds the server address, ports, accounts (enrolled by certificate) and channels.
-- **Video Servers** holds the RTSP or SRT servers, their credentials or passphrases, and how the
-  team's clients open the stream. A server can randomize its stream path per application start.
+**Pre-Flight Setup** has a rail at the left and shows one group at a time:
+
+- **Aircraft** holds the aircraft limits, the battery warnings and the stick mode, and shows what
+  the aircraft holds next to each value.
+- **Memory Card** shows the card and its free space.
+- **TAK** holds the server address, ports, accounts (enrolled by certificate) and channels.
+- **Video** holds the video quality, the RTSP or SRT servers, their credentials or passphrases, and
+  how the team's clients open the stream. A server can randomize its stream path per application
+  start.
+- **Map Data** holds the DTED terrain tiles (one region `.zip` per area), the FAA airspace (UASFM)
+  data, the small map's source (Street, Hybrid, or a custom tile server you set) and an offline
+  copy of the custom map for an area.
 - **Application Mode** is **Elevated** (two TAK accounts — one carries the video link to a single
   channel — two video servers, Emergency Broadcast) or **Basic** (one account, one video server).
-- **Configuration locks** keep a section from being changed by accident. To unlock one, turn on
-  the switch in the confirmation and touch Unlock; changing the Application Mode asks the same way.
-  In Basic mode a lock opens with one touch.
+- **Configuration locks** keep a group from being changed by accident. To unlock one, touch the lock
+  at the right of its title, turn on the switch in the confirmation and touch Unlock; changing the
+  Application Mode asks the same way. In Basic mode a lock opens with one touch.
 
 ## 4. Hardware notes
 

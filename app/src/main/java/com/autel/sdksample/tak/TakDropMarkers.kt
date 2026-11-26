@@ -25,11 +25,16 @@ object TakDropMarkers {
     private const val PREFS = "takpilot2_dropped"
     private const val KEY = "pins"
 
+    /**
+     * The declaration order is the order of every type list on the flight screen (design
+     * decision): Unknown first, because it was the static marker's only type before the list.
+     * A saved pin stores [id], never the position, thus the order can change.
+     */
     enum class Affiliation(val id: String, val label: String, val res: Int) {
-        FRIENDLY("Friendly", "Friendly", R.drawable.marker_friendly),
-        HOSTILE("Hostile", "Hostile", R.drawable.marker_hostile),
-        NEUTRAL("Neutral", "Neutral", R.drawable.marker_neutral),
         UNKNOWN("Unknown", "Unknown", R.drawable.marker_unknown),
+        HOSTILE("Hostile", "Hostile", R.drawable.marker_hostile),
+        FRIENDLY("Friendly", "Friendly", R.drawable.marker_friendly),
+        NEUTRAL("Neutral", "Neutral", R.drawable.marker_neutral),
     }
 
     private class Pin(
@@ -209,7 +214,7 @@ object TakDropMarkers {
     }
 
     /**
-     * Next marker name: the AIRCRAFT's callsign plus a two-digit sequence, e.g. `EVO2-07`.
+     * Next marker name: the AIRCRAFT's callsign plus a two-digit sequence, e.g. `UAS-ALPHA-07`.
      *
      * WHY NOT "Friendly Marker". That was the earlier scheme and it does not survive
      * contact with a real shared picture: with two aircraft up, a "Friendly Marker" from one is

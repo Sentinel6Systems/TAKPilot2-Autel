@@ -131,6 +131,7 @@ object AutelAvoidance {
                 override fun onSuccess(info: AvoidanceRadarInfo?) {
                     info ?: return
                     radar = info
+                    SensorTrace.onRadar(info)
                     logRadarSample(info)
                 }
                 override fun onFailure(error: AutelError?) {

@@ -19,7 +19,7 @@ import java.util.concurrent.Executors
  * not reset a stop that came first), which this app layer works around rather than changes.
  *
  * Before this object, cert B was dialled from the reconnect worker and from two
- * TakServerActivity workers, and cleared from the main thread in four places (the mode change,
+ * TakServerPanel workers, and cleared from the main thread in four places (the mode change,
  * the TAK badge, the Elevated switch, Log Out) — so any two could interleave.
  *
  * What this object guarantees, in the app layer:

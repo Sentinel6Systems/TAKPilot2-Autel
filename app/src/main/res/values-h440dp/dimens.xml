@@ -18,4 +18,6 @@
          which is stated above as one that must keep working. Change the two together, in EVERY
          bucket that overrides either one. -->
     <dimen name="flight_resource_row_margin_end">174dp</dimen>
+    <!-- flight_resource_row_margin_end + 6dp: see the base entry. -->
+    <dimen name="flight_antenna_arc_margin_end">180dp</dimen>
 </resources>

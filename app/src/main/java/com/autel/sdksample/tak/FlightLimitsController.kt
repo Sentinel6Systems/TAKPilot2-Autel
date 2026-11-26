@@ -168,6 +168,8 @@ object FlightLimitsController {
         // gauge still banded from the last one would be quietly wrong.
         aircraftWarningPct = null
         aircraftCriticalPct = null
+        aircraftMaxAltM = null
+        aircraftMaxRangeM = null
     }
 
     /**
@@ -237,6 +239,13 @@ object FlightLimitsController {
     @Volatile var aircraftReturnHeightM: Float? = null
         private set
 
+    /** The max altitude and max distance the aircraft last reported, in metres. Null until it
+     *  answers. Pre-Flight shows them under its fields ([readAircraft], [readBack]). */
+    @Volatile var aircraftMaxAltM: Float? = null
+        private set
+    @Volatile var aircraftMaxRangeM: Float? = null
+        private set
+
     /**
      * The battery levels the AIRCRAFT actually holds, in percent — null until it tells us.
      *
@@ -246,10 +255,9 @@ object FlightLimitsController {
      * than our intent — a battery gauge coloured from an unsent setting is exactly the kind of
      * confident-and-wrong readout this app tries not to produce.
      *
-     * NOT read by a call of its own. These are filled in by [AircraftSettingsDump], which
-     * already reads both once per connect; issuing a second pair of reads would add traffic to
-     * the fly-controller channel for a value we are handed anyway. Only ever written from an
-     * aircraft reply.
+     * Filled in by [AircraftSettingsDump] once per connect, and by [readAircraft] when
+     * Pre-Flight resumes or after an Apply: a pilot who opens the screen is asking for them.
+     * Only ever written from an aircraft reply.
      */
     // internal, not private, set: FlightWarningsTest injects thresholds. Production
     // writes stay in this file only.
@@ -424,7 +432,7 @@ object FlightLimitsController {
                     if (confirmed.isNotEmpty()) {
                         append(" It confirms: ${confirmed.joinToString(", ")}.")
                     }
-                    append(" Press the button again.")
+                    append(" Touch the button again.")
                 }
                 ReportState.PROBLEM -> {
                     append("⚠ The aircraft did not take all the settings.")
@@ -438,7 +446,7 @@ object FlightLimitsController {
                     if (unknown.isNotEmpty()) {
                         append(" It did not answer for: ${unknown.joinToString(", ")}.")
                     }
-                    append(" Correct the values, then press the button again.")
+                    append(" Correct the values, then touch the button again.")
                 }
             }
         }
@@ -460,7 +468,7 @@ object FlightLimitsController {
     fun readBack(context: Context, refused: RefusedWrites?, done: (ReadBackReport) -> Unit) {
         val fc = AutelProductHolder.evo2?.flyController ?: run {
             done(ReadBackReport(
-                "Aircraft disconnected before it could be verified.", ReportState.PROBLEM))
+                "The aircraft disconnected before the app could read the settings.", ReportState.PROBLEM))
             return
         }
         val wantAlt = ftToM(savedMaxAltitudeFt(context))
@@ -486,7 +494,7 @@ object FlightLimitsController {
                 listOf(
                     LimitReadBack("Max altitude", wantAlt, got["alt"]),
                     LimitReadBack("Max distance", wantRad, got["rad"]),
-                    LimitReadBack("RTH altitude", wantRth, got["rth"]),
+                    LimitReadBack("Return-home altitude", wantRth, got["rth"]),
                 ),
                 refused?.snapshot() ?: emptyList(),
             ))
@@ -513,13 +521,21 @@ object FlightLimitsController {
                     override fun onSuccess(v: Float?) {
                         if (v == null) AppLog.w(TAG, "$label read answered with no value — unknown")
                         v?.let { got[key] = it }
-                        // Keep the flight HUD in step with what we just learned.
-                        if (key == "rth") aircraftReturnHeightM = v
+                        // Keep the flight HUD and Pre-Flight in step with what we just learned.
+                        when (key) {
+                            "rth" -> aircraftReturnHeightM = v
+                            "alt" -> aircraftMaxAltM = v
+                            "rad" -> aircraftMaxRangeM = v
+                        }
                         oneDown()
                     }
                     override fun onFailure(error: AutelError?) {
                         AppLog.w(TAG, "$label read failed: ${error?.description} — unknown")
-                        if (key == "rth") aircraftReturnHeightM = null
+                        when (key) {
+                            "rth" -> aircraftReturnHeightM = null
+                            "alt" -> aircraftMaxAltM = null
+                            "rad" -> aircraftMaxRangeM = null
+                        }
                         oneDown()
                     }
                 })
@@ -531,6 +547,64 @@ object FlightLimitsController {
         read("alt", "max altitude") { fc.getMaxHeight(it) }
         read("rad", "max distance") { fc.getMaxRange(it) }
         read("rth", "RTH altitude") { fc.getReturnHeight(it) }
+    }
+
+    /**
+     * READS what the aircraft holds and changes nothing, for the lines under the Pre-Flight
+     * fields (design decision). Pre-Flight calls it when it resumes
+     * and when the aircraft connects while it shows, so the values do not wait for an Apply.
+     * Reads only, so it is not a write "on a timer", and it is not polled.
+     *
+     * ⚠ EVERY GETTER HERE IS ONE-SHOT, CHECKED IN THE aar BYTECODE (no new subscription):
+     * `getMaxHeight`, `getMaxRange`, `getReturnHeight` (`SM_Max_Height`, `SM_Max_Range`,
+     * `SM_RTH_Height`) and the two battery levels (`SM_THR_TWO`, `SM_THR_ONE`) each send one
+     * `ParamsQueryPacket` through `BaseController.sendPacket`, which removes the callback after
+     * the reply or the 10 s timeout. A second request for the same parameter waits for the
+     * first reply; it does not open a second stream. Do NOT add `getVisualSettingInfo` or any
+     * other getter here without the same check: that one is an endless ~2 Hz subscription.
+     *
+     * @param limits false after an Apply, whose [readBack] has just read the three limits.
+     * @param done on the main thread, when every getter answered or the watchdog fired.
+     */
+    fun readAircraft(limits: Boolean = true, done: () -> Unit) {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val evo = AutelProductHolder.evo2 ?: run { main.post(done); return }
+        val fc = evo.flyController
+        val bat = evo.battery
+        val outstanding = java.util.concurrent.atomic.AtomicInteger(if (limits) 5 else 2)
+        // ONE-SHOT, for the same reason as in readBack: this SDK can fire a callback twice.
+        val reported = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun finish() { if (reported.compareAndSet(false, true)) main.post(done) }
+        fun oneDown() { if (outstanding.decrementAndGet() <= 0) finish() }
+        main.postDelayed({ finish() }, READ_BACK_TIMEOUT_MS)
+
+        /** One getter. A failure leaves the old value for the battery levels, which the flight
+         *  gauge also reads, and clears a limit: unknown must look unknown. */
+        fun read(label: String, call: (com.autel.common.CallbackWithOneParam<Float>) -> Unit,
+                 store: (Float?) -> Unit, clearOnFailure: Boolean) {
+            runCatching {
+                call(object : com.autel.common.CallbackWithOneParam<Float> {
+                    override fun onSuccess(v: Float?) { store(v); oneDown() }
+                    override fun onFailure(error: AutelError?) {
+                        AppLog.w(TAG, "$label read failed: ${error?.description} — unknown")
+                        if (clearOnFailure) store(null)
+                        oneDown()
+                    }
+                })
+            }.onFailure {
+                AppLog.w(TAG, "$label read threw: ${it.message} — unknown")
+                oneDown()
+            }
+        }
+        if (limits) {
+            read("max altitude", { fc.getMaxHeight(it) }, { aircraftMaxAltM = it }, true)
+            read("max distance", { fc.getMaxRange(it) }, { aircraftMaxRangeM = it }, true)
+            read("RTH altitude", { fc.getReturnHeight(it) }, { aircraftReturnHeightM = it }, true)
+        }
+        read("battery warning", { bat.getLowBatteryNotifyThreshold(it) },
+            { reportAircraftBatteryLevel(false, it) }, false)
+        read("battery critical", { bat.getCriticalBatteryNotifyThreshold(it) },
+            { reportAircraftBatteryLevel(true, it) }, false)
     }
 
     /** Apply whichever limits are configured. Skips any limit whose field is empty/unparseable —
@@ -600,12 +674,12 @@ object FlightLimitsController {
             })
         }
         rthAltM?.let { m ->
-            if (!inRange("RTH altitude", "setReturnHeight", m, rthRange)) return@let
+            if (!inRange("Return-home altitude", "setReturnHeight", m, rthRange)) return@let
             fc.setReturnHeight(m.toDouble(), object : com.autel.common.CallbackWithNoParam {
                 override fun onSuccess() { AppLog.i(TAG, "setReturnHeight($m): OK") }
                 override fun onFailure(error: AutelError?) {
                     AppLog.w(TAG, "setReturnHeight($m) failed: ${error?.description}")
-                    refused.add("RTH altitude")
+                    refused.add("Return-home altitude")
                 }
             })
         }
@@ -631,7 +705,7 @@ object FlightLimitsController {
      */
 
     /** Parses a feet string to a rounded meters int, or null if blank/unparseable. */
-    private fun ftToM(feetStr: String): Int? {
+    internal fun ftToM(feetStr: String): Int? {
         val ft = feetStr.trim().toDoubleOrNull() ?: return null
         return Math.round(ft / FT_PER_M).toInt()
     }
@@ -656,21 +730,21 @@ object FlightLimitsController {
         if (low <= crit) {
             AppLog.e(TAG, "REFUSING battery thresholds: low ($low%) is not above critical ($crit%) " +
                 "— the aircraft would return home and force-land at the same moment")
-            refused.add("Battery levels (Warning must be above Critical)")
+            refused.add("Battery levels (Warning must be higher than Critical)")
             return
         }
         bat.setLowBatteryNotifyThreshold(low / 100f, object : com.autel.common.CallbackWithNoParam {
             override fun onSuccess() { AppLog.i(TAG, "low battery threshold set to $low%: OK") }
             override fun onFailure(error: AutelError?) {
                 AppLog.w(TAG, "low battery threshold $low% failed: ${error?.description}")
-                refused.add("Low battery level")
+                refused.add("Battery Warning")
             }
         })
         bat.setCriticalBatteryNotifyThreshold(crit / 100f, object : com.autel.common.CallbackWithNoParam {
             override fun onSuccess() { AppLog.i(TAG, "critical battery threshold set to $crit%: OK") }
             override fun onFailure(error: AutelError?) {
                 AppLog.w(TAG, "critical battery threshold $crit% failed: ${error?.description}")
-                refused.add("Critical battery level")
+                refused.add("Battery Critical")
             }
         })
     }

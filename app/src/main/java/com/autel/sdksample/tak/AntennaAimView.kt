@@ -35,6 +35,21 @@ class AntennaAimView @JvmOverloads constructor(
 
     // Flight-tuned HUD colours, resolved once per view — see takpilot_colors.xml.
     private val ALIGNED_GREEN = ContextCompat.getColor(context, R.color.tp_state_go)
+    private val UNRELIABLE_RED = ContextCompat.getColor(context, R.color.tp_state_danger)
+
+    /**
+     * False paints the whole indicator RED: the compass of the controller is disturbed (a
+     * vehicle, steel near it) and the marker can be wrong by any amount, even pointing
+     * behind a pilot who faces the aircraft. Red
+     * replaces green too: an aligned marker from a bad compass is not aligned.
+     */
+    fun setCompassReliable(reliable: Boolean) {
+        if (reliable == compassReliable) return
+        compassReliable = reliable
+        invalidate()
+    }
+
+    private var compassReliable = true
 
     /**
      * Aircraft bearing relative to the controller's facing, -180..+180 (0 = dead ahead).
@@ -44,25 +59,42 @@ class AntennaAimView @JvmOverloads constructor(
         if (relDeg == null && shownRelDeg == null) return
         // Sub-degree jitter from the rotation vector is invisible on a ~40dp arc; skip
         // the redraw unless the marker would actually move.
-        if (relDeg != null && shownRelDeg != null && abs(relDeg - shownRelDeg!!) < 0.5) return
+        //
+        // Geometry edge case: a RAW signed difference doesn't wrap at ±180°. An aircraft
+        // sitting directly behind the pilot can jitter between e.g. +179.7° and -179.8° — a
+        // true angular change of ~0.5°, invisible on the arc — but `179.7 - (-179.8)` is
+        // ~359.5, which reads as a huge jump and defeats this exact filter right at the one
+        // spot (behind the pilot) where sub-degree jitter is most likely to show up as churn.
+        if (relDeg != null && shownRelDeg != null && abs(angularDiff(relDeg, shownRelDeg!!)) < 0.5) return
         shownRelDeg = relDeg
         visibility = if (relDeg == null) GONE else VISIBLE
         invalidate()
     }
 
+    /** Signed angular difference a-b, wrapped into -180..+180 — the shortest way around the
+     *  circle, not the raw arithmetic difference. */
+    private fun angularDiff(a: Double, b: Double): Double {
+        var d = (a - b) % 360.0
+        if (d > 180.0) d -= 360.0
+        if (d < -180.0) d += 360.0
+        return d
+    }
+
     private var shownRelDeg: Double? = null
 
     private val dp = resources.displayMetrics.density
-    private val arcRadius = 40f * dp
-    private val markerR = 5f * dp
+    // HALF THE SIZE IT HAD (design decision): the radius and the marker were 40 and 5 dp.
+    // The lines keep three quarters of their width, or they would not show on the video.
+    private val arcRadius = 20f * dp
+    private val markerR = 2.5f * dp
 
     private val arcOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK; alpha = 160
-        style = Paint.Style.STROKE; strokeWidth = 4f * dp
+        style = Paint.Style.STROKE; strokeWidth = 3f * dp
     }
     private val arcLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        style = Paint.Style.STROKE; strokeWidth = 2f * dp
+        style = Paint.Style.STROKE; strokeWidth = 1.5f * dp
     }
     private val dotOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK; alpha = 160
@@ -71,11 +103,11 @@ class AntennaAimView @JvmOverloads constructor(
     private val markerFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val markerStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        style = Paint.Style.STROKE; strokeWidth = 2f * dp
+        style = Paint.Style.STROKE; strokeWidth = 1.5f * dp
     }
     private val markerHalo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK; alpha = 160
-        style = Paint.Style.STROKE; strokeWidth = 4.5f * dp
+        style = Paint.Style.STROKE; strokeWidth = 3.4f * dp
     }
     private val markerPath = Path()
 
@@ -96,12 +128,15 @@ class AntennaAimView @JvmOverloads constructor(
         // The semicircle, ends at the pilot's 9 and 3 o'clock. Sweep is screen-angle:
         // 180°..360° covers left-horizon over the top to right-horizon.
         val r = arcRadius
+        val base = if (compassReliable) Color.WHITE else UNRELIABLE_RED
+        arcLine.color = base
+        dotFill.color = base
         for (p in arrayOf(arcOutline, arcLine)) {
             canvas.drawArc(cx - r, cy - r, cx + r, cy + r, 180f, 180f, false, p)
         }
         // Pilot dot.
-        canvas.drawCircle(cx, cy, 3.5f * dp, dotOutline)
-        canvas.drawCircle(cx, cy, 2.5f * dp, dotFill)
+        canvas.drawCircle(cx, cy, 2.2f * dp, dotOutline)
+        canvas.drawCircle(cx, cy, 1.5f * dp, dotFill)
 
         // Aircraft marker. On-arc position clamps to the arc span; behind the pilot the
         // marker pins at the end and draws hollow (stroke only).
@@ -111,7 +146,11 @@ class AntennaAimView @JvmOverloads constructor(
         val mx = cx + (r * sin(a)).toFloat()
         val my = cy - (r * cos(a)).toFloat()
         val aligned = abs(rel) <= FlightActivity.ANTENNA_ALIGNED_DEG
-        val tint = if (aligned) ALIGNED_GREEN else Color.WHITE
+        val tint = when {
+            !compassReliable -> UNRELIABLE_RED
+            aligned -> ALIGNED_GREEN
+            else -> Color.WHITE
+        }
         markerFill.color = tint
         markerStroke.color = tint
         // Triangle nose points outward along the pilot→aircraft direction, so the marker
@@ -124,8 +163,5 @@ class AntennaAimView @JvmOverloads constructor(
         markerPath.close()
         canvas.drawPath(markerPath, markerHalo)
         canvas.drawPath(markerPath, if (behind) markerStroke else markerFill)
-    }
-
-    private companion object {
     }
 }

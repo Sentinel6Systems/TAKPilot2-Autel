@@ -83,21 +83,21 @@ class AppModeTest {
     @Test
     fun `an active slot 2 counts as the second server in use`() {
         assertTrue(AppMode.secondVideoServerInUse(
-            FakePrefs().put(VideoServersActivity.KEY_V_ACTIVE_SLOT, 2)))
+            FakePrefs().put(VideoServersPanel.KEY_V_ACTIVE_SLOT, 2)))
     }
 
     /** ⚠ The one a "check the active slot" reading misses — the CoT names Server 2 anyway. */
     @Test
     fun `an advertisement through server 2 counts as the second server in use`() {
         assertTrue(AppMode.secondVideoServerInUse(
-            FakePrefs().put(VideoServersActivity.vKey(1, "advertise"),
-                VideoServersActivity.ADV_OTHER)))
+            FakePrefs().put(VideoServersPanel.vKey(1, "advertise"),
+                VideoServersPanel.ADV_OTHER)))
     }
 
     @Test
     fun `a configured server 2 counts as the second server in use`() {
         assertTrue(AppMode.secondVideoServerInUse(
-            FakePrefs().put(VideoServersActivity.vKey(2, "host"), "media.example.com")))
+            FakePrefs().put(VideoServersPanel.vKey(2, "host"), "media.example.com")))
     }
 
     @Test
@@ -105,7 +105,7 @@ class AppModeTest {
         assertFalse(AppMode.secondVideoServerInUse(FakePrefs()))
         // A blank host is not configuration — a field that was cleared again.
         assertFalse(AppMode.secondVideoServerInUse(
-            FakePrefs().put(VideoServersActivity.vKey(2, "host"), "   ")))
+            FakePrefs().put(VideoServersPanel.vKey(2, "host"), "   ")))
     }
 
     // ---- ensureMigrated writes once, and then never again ----
@@ -145,7 +145,7 @@ class AppModeTest {
             .put("video_host", "media.example.com").put("video_streamid", "UAS-1")
             .put("video_user", "pilot").put("video_pass", "s3cret")
         AppMode.settle(p, hasElevated = false)
-        assertEquals("media.example.com", p.getString(VideoServersActivity.vKey(1, "host"), null))
+        assertEquals("media.example.com", p.getString(VideoServersPanel.vKey(1, "host"), null))
         assertEquals("the plain host must survive the boot mirror",
             "media.example.com", p.getString("video_host", null))
         assertEquals("UAS-1", p.getString("video_streamid", null))
@@ -177,7 +177,7 @@ class AppModeTest {
             assertEquals("lock $lock", AppMode.ENHANCED, settled { put(lock, true) })
         }
         assertEquals("a second video server", AppMode.ENHANCED,
-            settled { put(VideoServersActivity.vKey(2, "host"), "two.example.com") })
+            settled { put(VideoServersPanel.vKey(2, "host"), "two.example.com") })
         assertEquals("a logged-out Elevated account", AppMode.ENHANCED,
             settled { put("chb_logged_out", true) })
         assertEquals("no sign at all", AppMode.BASIC, settled())
@@ -191,13 +191,13 @@ class AppModeTest {
     fun `settle enforces the BASIC invariants at boot`() {
         val p = FakePrefs(AppMode.BASIC).slotsMigrated().put(AppMode.KEY_MODE_MIGRATED, true)
             .put(TakAutoConnect.KEY_CHB_ENABLED, true)
-            .put(VideoServersActivity.KEY_V_ACTIVE_SLOT, 2)
-            .put(VideoServersActivity.vKey(1, "host"), "one.example.com")
-            .put(VideoServersActivity.vKey(2, "host"), "two.example.com")
+            .put(VideoServersPanel.KEY_V_ACTIVE_SLOT, 2)
+            .put(VideoServersPanel.vKey(1, "host"), "one.example.com")
+            .put(VideoServersPanel.vKey(2, "host"), "two.example.com")
             .put("video_host", "two.example.com")
         AppMode.settle(p, hasElevated = true)
         assertEquals(false, p.getBoolean(TakAutoConnect.KEY_CHB_ENABLED, true))
-        assertEquals(1, p.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 0))
+        assertEquals(1, p.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 0))
         assertEquals("the plain keys follow", "one.example.com", p.getString("video_host", null))
     }
 
@@ -210,9 +210,9 @@ class AppModeTest {
     fun `settle re-derives an ENHANCED controller's drifted plain keys`() {
         val p = FakePrefs(AppMode.ENHANCED).put(AppMode.KEY_MODE_MIGRATED, true)
             .put("video_slots_migrated", true).put("video_port_per_protocol_migrated", true)
-            .put(VideoServersActivity.KEY_V_ACTIVE_SLOT, 2)
-            .put(VideoServersActivity.vKey(2, "host"), "two.example.com")
-            .put(VideoServersActivity.vKey(2, "adv_transport"), "rtsp")
+            .put(VideoServersPanel.KEY_V_ACTIVE_SLOT, 2)
+            .put(VideoServersPanel.vKey(2, "host"), "two.example.com")
+            .put(VideoServersPanel.vKey(2, "adv_transport"), "rtsp")
             // The drift: the plain read leg still carries server 1's SRT.
             .put("video_adv_host", "two.example.com").put("video_adv_transport", "srt")
         AppMode.settle(p, hasElevated = true)
@@ -231,7 +231,7 @@ class AppModeTest {
         // active slot as an Int first, which would mask the drift this test is about.
         AppMode.settle(
             FakePrefs().put("video_slots_migrated", true).put("video_port_per_protocol_migrated", true)
-                .put(VideoServersActivity.KEY_V_ACTIVE_SLOT, "2"),
+                .put(VideoServersPanel.KEY_V_ACTIVE_SLOT, "2"),
             hasElevated = false)
     }
 
@@ -247,7 +247,7 @@ class AppModeTest {
             .put("video_user", "pilot")
             .put("video_port", "8554")              // the drift: a String where an Int belongs
         runCatching { AppMode.settle(p, hasElevated = false) }
-        VideoServersActivity.mirrorActiveSlot(p)   // what Pre-Flight's onCreate and onResume do
+        VideoServersPanel.mirrorActiveSlot(p)   // what Pre-Flight's onCreate and onResume do
         assertEquals("media.example.com", p.getString("video_host", null))
         assertEquals("uas1", p.getString("video_streamid", null))
         assertEquals("pilot", p.getString("video_user", null))

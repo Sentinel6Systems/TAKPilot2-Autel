@@ -57,7 +57,7 @@ object TakAutoConnect {
      * IT.** [tryReconnect] fires from the HOME screen's `onCreate`, and that screen is
      * `singleTask` — so coming back to it does not run again. The other retry that actually
      * covered a pilot was Pre-Flight's own `onCreate`, which reconnected from saved certs on
-     * the way past, and that went to [TakServerActivity] with the fields. What was left was an
+     * the way past, and that went to [TakServerPanel] with the fields. What was left was an
      * application that would not reconnect unless the pilot opened a screen they have no other
      * reason to open, or tapped the flight screen's TAK badge.
      *
@@ -165,8 +165,10 @@ object TakAutoConnect {
 
     /** The actual connect, on a background thread. Shared by [tryReconnect], [retryIfDown] and
      *  [toggle] so the paths can't drift — the channel routing and bridge startup below are
-     *  easy to forget in a second copy. */
-    private fun reconnect(context: Context) {
+     *  easy to forget in a second copy. Also the callsign change in [TakServerPanel].
+     *  @return false when nothing was started: the saved enrollment is not complete, or an
+     *  attempt is already in flight. */
+    internal fun reconnect(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val host = prefs.getString(KEY_HOST, "") ?: ""
         val username = prefs.getString(KEY_USERNAME, "") ?: ""
@@ -181,9 +183,13 @@ object TakAutoConnect {
             prefs.edit().putString(KEY_UID, uid).apply()
         }
 
+        if (host.isEmpty() || ts.isEmpty() || cc.isEmpty()) {
+            Log.w(TAG, "reconnect requested but the saved enrollment is not complete")
+            return false
+        }
         if (connecting) {
             Log.i(TAG, "reconnect already in flight — ignoring this request")
-            return
+            return false
         }
         connecting = true
 
@@ -194,7 +200,7 @@ object TakAutoConnect {
           // log line. It matters more now that a screen resume can start this.
           try {
             // 2nd arg is the CALLSIGN, not the username — see the same fix in
-            // TakServerActivity.connectWithCerts. Both connect paths had it wrong, so the
+            // TakServerPanel.connectWithCerts. Both connect paths had it wrong, so the
             // aircraft reported the pilot's login name to the whole team either way.
             TakManager.getInstance().connect(
                 uid, callsign, "Cyan", "Team Member",
@@ -216,6 +222,7 @@ object TakAutoConnect {
             connecting = false
           }
         }.start()
+        return true
     }
 
     /**

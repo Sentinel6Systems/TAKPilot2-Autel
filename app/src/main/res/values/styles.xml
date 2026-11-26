@@ -294,4 +294,31 @@
         <item name="android:textColor">@color/tp_text_primary</item>
         <item name="android:textSize">18sp</item>
     </style>
+
+    <!-- An item of a left rail: Pre-Flight Setup (and the Field Guide, when it has tabs). The
+         selected look is set in code (markRailItem), because it changes with each touch. -->
+    <!-- The aircraft's value under a Pre-Flight field (TakConnectActivity.renderAircraftValues).
+         The colour is set in code: green same, amber DIFFERENT, grey dash no answer. -->
+    <style name="pfAircraftValue">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/tp_text_tertiary</item>
+        <item name="android:paddingTop">3dp</item>
+        <item name="android:text">Aircraft: —</item>
+    </style>
+
+    <style name="pfRailItem">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">@dimen/preflight_rail_item_height</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:textSize">@dimen/preflight_rail_text_size</item>
+        <item name="android:textColor">@color/tp_text_secondary</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
 </resources>

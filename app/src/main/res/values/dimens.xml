@@ -633,6 +633,11 @@
 	     Smart Controller V3, which lands in values-w820dp where the map is 180dp, not 130dp.
 	     Update alongside flight_map_size. -->
 	<dimen name="flight_resource_row_margin_end">144dp</dimen>
+	<!-- THE ANTENNA-AIM ARC: AGAINST THE LEFT EDGE OF THE SMALL MAP, at the bottom (design
+         decision). DERIVED: flight_resource_row_margin_end
+         (the map's left edge from the end of the screen) + a 6dp gap. Change the two together,
+         in every bucket. The large map covers the arc; the debug resource row runs under it. -->
+	<dimen name="flight_antenna_arc_margin_end">150dp</dimen>
 
 	<dimen name="margin_84dp">84dp</dimen>
 	<dimen name="margin_30dp">30dp</dimen>
@@ -722,5 +727,13 @@
          one. This is the same two-radius rule the mini-map frame follows. -->
     <dimen name="hud_pill_radius">8dp</dimen>
     <dimen name="hud_pill_stroke">1.5dp</dimen>
+
+    <!-- The left rail of Pre-Flight Setup. -->
+    <dimen name="preflight_rail_width">132dp</dimen>
+    <dimen name="preflight_rail_item_height">48dp</dimen>
+    <dimen name="preflight_rail_text_size">14sp</dimen>
+    <dimen name="preflight_rail_edge">2dp</dimen>
+    <!-- The bar at the start of the selected rail item. -->
+    <dimen name="preflight_rail_mark">4dp</dimen>
 
 </resources>

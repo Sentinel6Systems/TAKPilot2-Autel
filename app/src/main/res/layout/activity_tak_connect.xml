@@ -1,98 +1,108 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- PRE-FLIGHT: A LEFT RAIL AND ONE SECTION GROUP AT A TIME (design decision).
+     The screen was one column of seven numbered
+     sections. The rail shows one group and hides the others. Every control keeps its id and
+     its code.
+
+     THE GROUPS ARE SHOWN AND HIDDEN, NEVER REMOVED. TakConnectActivity finds every view by id
+     in onCreate and sets up the locks last. A group that is GONE is still in the layout, so
+     that order does not change.
+
+     Application Mode is the last rail item, below a gap and a divider. It decides who
+     receives the aircraft, and a pilot must not touch it by accident. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/tp_bg_screen"
-    android:fillViewport="true">
+    android:orientation="horizontal"
+    android:baselineAligned="false"
+    android:background="@color/tp_bg_screen">
+
+    <ScrollView
+        android:layout_width="@dimen/preflight_rail_width"
+        android:layout_height="match_parent"
+        android:background="@color/tp_rail_bg"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:id="@+id/pfRail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/pfRailAircraft"
+                style="@style/pfRailItem"
+                android:text="Aircraft" />
+            <TextView
+                android:id="@+id/pfRailMemoryCard"
+                style="@style/pfRailItem"
+                android:text="Memory Card" />
+            <TextView
+                android:id="@+id/pfRailTak"
+                style="@style/pfRailItem"
+                android:text="TAK" />
+            <TextView
+                android:id="@+id/pfRailVideo"
+                style="@style/pfRailItem"
+                android:text="Video" />
+            <TextView
+                android:id="@+id/pfRailMapData"
+                style="@style/pfRailItem"
+                android:text="Map Data" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:minHeight="12dp" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/tp_border" />
+            <TextView
+                android:id="@+id/pfRailMode"
+                style="@style/pfRailItem"
+                android:text="Application\nMode" />
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- The edge of the rail, so the rail does not read as part of the page. -->
+    <View
+        android:layout_width="@dimen/preflight_rail_edge"
+        android:layout_height="match_parent"
+        android:background="@color/tp_rail_edge" />
+
+    <ScrollView
+        android:id="@+id/pfScroll"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="20dp">
 
-        <!-- 0. Memory Card.
-             Styled exactly like sections 1 to 5 — a 22sp heading and takLabelStyle labels
-             (design decision: the compact one-row version fitted but read as a different
-             kind of thing). The room it needs was taken back from the VERTICAL PADDING in
-             takLabelStyle and takFieldStyle instead, which tightens every section evenly.
-
-             ⚠ Sections 0 and 1 TOGETHER must fit the screen without scrolling. Measured on the
-             controller: the scroll viewport is 1264 px. Re-measure after any change here or to
-             those two styles — "Apply Updated Settings to Aircraft" going below the fold is the
-             failure this rule exists to prevent, and it is invisible in the layout editor.
-
-             ⚠ CAPACITY IS NOT SHOWN BECAUSE THE SDK DOES NOT REPORT IT. XT706CameraInfo gives
-             getSDcardFreeSpace() and no total; the whole aar was searched and only free-space
-             getters exist for the SD card (the INTERNAL flash has both, which is what makes the
-             absence look like an oversight rather than a rule). A capacity figure here would
-             have to be inferred, and an inferred number on a pre-flight screen is worse than an
-             absent one. -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="0. Memory Card"
-            android:textColor="@color/tp_text_primary"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:paddingBottom="4dp" />
-
-        <!-- gravity=bottom so the columns align on their BOTTOM edge. The Format button is a
-             full-height button and the readouts are one line of text; bottom alignment lets the
-             button grow UPWARD through the space the third column's label would have occupied,
-             instead of hanging below the readouts and reading as a second line. -->
-        <LinearLayout style="@style/takFormRow" android:gravity="bottom">
-            <LinearLayout style="@style/takColumn">
-                <TextView style="@style/takLabelStyle" android:text="Card" />
-                <TextView
-                    android:id="@+id/sdCardState"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/tp_text_bright"
-                    android:textSize="15sp" />
-            </LinearLayout>
-
-            <LinearLayout style="@style/takColumn">
-                <TextView style="@style/takLabelStyle" android:text="Free space" />
-                <TextView
-                    android:id="@+id/sdCardFree"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/tp_text_bright"
-                    android:textSize="15sp" />
-            </LinearLayout>
-
-            <!-- NO placeholder label here. The blank label that used to hold this column's
-                 top edge is exactly the space the button now grows into. -->
-            <LinearLayout style="@style/takColumn">
-                <Button
-                    android:id="@+id/sdCardFormatButton"
-                    style="@style/TakButton.Danger"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Format Card"
-                    android:textSize="12sp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- GONE, not INVISIBLE: an invisible line still holds its height, and the height is
-             exactly what there is no room for. renderSdCard() shows it only when it has text. -->
-        <TextView
-            android:id="@+id/sdCardStatus"
+        <LinearLayout
+            android:id="@+id/pfTabAircraft"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:visibility="gone"
-            android:textColor="@color/tp_text_caption"
-            android:textSize="12sp" />
+            android:orientation="vertical">
 
-        <!-- Section rule, the same 1dp tp_border with a 20dp lead-in that separates every
-             other section. It costs 42 px of the sections 0+1 height budget; see the note on
-             section 0 and re-measure if either section grows. -->
-        <View
+        <!-- WHICH AIRCRAFT THESE SETTINGS GO TO (design decision).
+             Generated from the connection. With no aircraft it says that the settings are saved
+             and sent at the connection. -->
+        <TextView
+            android:id="@+id/pfAircraftLine"
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="20dp"
-            android:background="@color/tp_border" />
+            android:layout_height="wrap_content"
+            android:paddingBottom="8dp"
+            android:textColor="@color/tp_text_secondary"
+            android:textSize="13sp" />
 
         <!-- 1. Aircraft Settings.
              LAID OUT TO FIT ONE SCREEN WITHOUT SCROLLING (design decision), because this is
@@ -107,7 +117,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="1. Aircraft Settings"
+            android:text="Aircraft Settings"
             android:textColor="@color/tp_text_primary"
             android:textSize="22sp"
             android:textStyle="bold"
@@ -119,8 +129,11 @@
                 <EditText
                     android:id="@+id/limitMaxAltitude"
                     style="@style/takFieldStyle"
-                    android:hint="e.g. 400"
+                    android:hint="Example: 400"
                     android:inputType="number" />
+                <TextView
+                    android:id="@+id/limitMaxAltitudeAircraft"
+                    style="@style/pfAircraftValue" />
             </LinearLayout>
 
             <LinearLayout style="@style/takColumn">
@@ -128,17 +141,23 @@
                 <EditText
                     android:id="@+id/limitMaxRadius"
                     style="@style/takFieldStyle"
-                    android:hint="e.g. 1600"
+                    android:hint="Example: 1600"
                     android:inputType="number" />
+                <TextView
+                    android:id="@+id/limitMaxRadiusAircraft"
+                    style="@style/pfAircraftValue" />
             </LinearLayout>
 
             <LinearLayout style="@style/takColumn">
-                <TextView style="@style/takLabelStyle" android:text="RTH altitude (ft)" />
+                <TextView style="@style/takLabelStyle" android:text="Return-home altitude (ft)" />
                 <EditText
                     android:id="@+id/limitRthAltitude"
                     style="@style/takFieldStyle"
-                    android:hint="e.g. 100"
+                    android:hint="Example: 100"
                     android:inputType="number" />
+                <TextView
+                    android:id="@+id/limitRthAltitudeAircraft"
+                    style="@style/pfAircraftValue" />
             </LinearLayout>
         </LinearLayout>
 
@@ -221,14 +240,12 @@
                         android:enabled="false"
                         android:text="Mode 3" />
                 </RadioGroup>
+                <!-- The CONTROLLER'S value, painted by renderAircraftValues like the lines under
+                     the limits. The stick mode belongs to the remote controller. -->
                 <TextView
                     android:id="@+id/stickModeStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/tp_text_tertiary"
-                    android:textSize="12sp"
-                    android:paddingTop="4dp"
-                    android:text="" />
+                    style="@style/pfAircraftValue"
+                    android:text="Controller: —" />
             </LinearLayout>
         </LinearLayout>
 
@@ -347,8 +364,11 @@
                 <EditText
                     android:id="@+id/limitLowBattery"
                     style="@style/takFieldStyle"
-                    android:hint="e.g. 15"
+                    android:hint="Example: 15"
                     android:inputType="number" />
+                <TextView
+                    android:id="@+id/limitLowBatteryAircraft"
+                    style="@style/pfAircraftValue" />
             </LinearLayout>
 
             <LinearLayout style="@style/takColumn">
@@ -356,8 +376,11 @@
                 <EditText
                     android:id="@+id/limitCriticalBattery"
                     style="@style/takFieldStyle"
-                    android:hint="e.g. 10"
+                    android:hint="Example: 10"
                     android:inputType="number" />
+                <TextView
+                    android:id="@+id/limitCriticalBatteryAircraft"
+                    style="@style/pfAircraftValue" />
             </LinearLayout>
 
             <LinearLayout style="@style/takColumn"
@@ -415,29 +438,201 @@
             android:textSize="12sp"
             android:paddingTop="4dp"
             android:text="Not sent yet." />
+        </LinearLayout>
 
-        <View
+        <LinearLayout
+            android:id="@+id/pfTabMemoryCard"
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="20dp"
-            android:background="@color/tp_border" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
 
+        <!-- MEMORY CARD, ITS OWN GROUP (design decision). It was section 0 of the Aircraft
+             group, above Aircraft Settings. Styled like the other sections: a 22sp heading and
+             takLabelStyle labels.
+
+             ⚠ CAPACITY IS NOT SHOWN BECAUSE THE SDK DOES NOT REPORT IT. XT706CameraInfo gives
+             getSDcardFreeSpace() and no total; the whole aar was searched and only free-space
+             getters exist for the SD card (the INTERNAL flash has both, which is what makes the
+             absence look like an oversight rather than a rule). A capacity figure here would
+             have to be inferred, and an inferred number on a pre-flight screen is worse than an
+             absent one. -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="2. Video Streaming"
+            android:text="Memory Card"
             android:textColor="@color/tp_text_primary"
             android:textSize="22sp"
             android:textStyle="bold"
-            android:paddingTop="16dp"
             android:paddingBottom="4dp" />
+
+        <!-- gravity=bottom so the columns align on their BOTTOM edge. The Format button is a
+             full-height button and the readouts are one line of text; bottom alignment lets the
+             button grow UPWARD through the space the third column's label would have occupied,
+             instead of hanging below the readouts and reading as a second line. -->
+        <LinearLayout style="@style/takFormRow" android:gravity="bottom">
+            <LinearLayout style="@style/takColumn">
+                <TextView style="@style/takLabelStyle" android:text="Card" />
+                <TextView
+                    android:id="@+id/sdCardState"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/tp_text_bright"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/takColumn">
+                <TextView style="@style/takLabelStyle" android:text="Free space" />
+                <TextView
+                    android:id="@+id/sdCardFree"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/tp_text_bright"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <!-- NO placeholder label here. The blank label that used to hold this column's
+                 top edge is exactly the space the button now grows into. -->
+            <LinearLayout style="@style/takColumn">
+                <Button
+                    android:id="@+id/sdCardFormatButton"
+                    style="@style/TakButton.Danger"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Format Card"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- renderSdCard() shows this line only when it has text. -->
+        <TextView
+            android:id="@+id/sdCardStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:textColor="@color/tp_text_caption"
+            android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/pfTabTak"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <!-- TAK SERVER CONNECTION BEFORE VIDEO STREAMING (design decision): the callsign is
+             set here, and the Broadcast ID takes it by default. -->
+        <!-- THE TAK LOCK IS IN THE TITLE ROW, AT THE RIGHT (design decision). It was beside
+             the server host, which is now half a page down. In
+             the title row it is on the screen when the group opens, and it is in the same place
+             in the Video group. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="TAK Server Connection"
+                android:textColor="@color/tp_text_primary"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+            <CheckBox
+                android:id="@+id/takLockConfig"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:buttonTint="@color/tp_accent"
+                android:text="Lock configuration"
+                android:textColor="@color/tp_text_primary"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- THE SUMMARY, FIRST: it is what a pilot READS before a flight — who this aircraft
+             is signed in as, and which channels it reaches. All three lines are generated from
+             the live state, so none of them can go stale the way a typed label does. The
+             configuration is below it. -->
+        <TextView
+            android:id="@+id/takSummaryStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/tp_text_secondary"
+            android:textSize="13sp"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/takSummaryChannels"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/tp_text_tertiary"
+            android:textSize="12sp"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/takSummaryElevated"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/tp_text_tertiary"
+            android:textSize="12sp"
+            android:text="" />
+
+        <!-- THE TAK CONFIGURATION IS BACK ON THIS PAGE (design decision). It was behind
+             a "Configure TAK Server" button while Pre-Flight was one long
+             column. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="14dp"
+            android:background="@color/tp_border" />
+
+        <include layout="@layout/panel_tak_server" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/pfTabVideo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+        <!-- THE VIDEO LOCK IS IN THE TITLE ROW, AT THE RIGHT, as the TAK lock is. It guards
+             the Active server toggle and the server cards below. The video quality is NOT
+             behind it. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="16dp"
+            android:paddingBottom="4dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Video Streaming"
+                android:textColor="@color/tp_text_primary"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+            <CheckBox
+                android:id="@+id/videoLockConfig"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:buttonTint="@color/tp_accent"
+                android:text="Lock configuration"
+                android:textColor="@color/tp_text_primary"
+                android:textSize="14sp" />
+        </LinearLayout>
 
         <!-- QUALITY FIRST, above the server configuration. It is the control a pilot reaches
              for in the air — dropping to Low on a marginal link — and the one setting in this
              section that is NOT behind the lock, for that reason. Everything below it is set
              once and then left alone. Putting the thing you touch often above the thing you
              touch once is the point. -->
-        <TextView style="@style/takLabelStyle" android:text="Video quality (on-device transcode)" />
+        <TextView style="@style/takLabelStyle" android:text="Stream quality" />
         <RadioGroup
             android:id="@+id/videoProfileGroup"
             android:layout_width="match_parent"
@@ -469,15 +664,11 @@
 
         <!-- WHICH SERVER IS LIVE. This and the quality above it are the only video controls
              that change in the field — a team may fly on an internal media server on one
-             flight and an external one on the next. Everything else about a server is
-             entered one time on the Video Servers screen and then locked.
+             flight and an external one on the next.
 
-             The lock stays here because it guards this toggle as well as that screen: this is
-             the video control a pilot is most likely to hit by accident. -->
-        <!-- ⚠ The label carries an id so BASIC can hide it WITH its radio group — INVISIBLE,
-             never GONE, so the lock row does not rise under the quality radios. The ROW below
-             must NOT be hidden: it also holds videoLockConfig, and a hidden row would leave the
-             lock applied and out of reach. See TakConnectActivity.setupVideoControls. -->
+             BASIC hides this label and the group (GONE). They were INVISIBLE while the lock
+             box shared this row, so that the box kept its place. The lock is in the title row
+             now, so nothing depends on the space. -->
         <TextView
             android:id="@+id/videoActiveServerLabel"
             style="@style/takLabelStyle"
@@ -505,22 +696,11 @@
                     android:text="Server 2" />
 
             </RadioGroup>
-
-            <LinearLayout style="@style/takColumn">
-                <CheckBox
-                    android:id="@+id/videoLockConfig"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:buttonTint="@color/tp_accent"
-                    android:text="Lock configuration"
-                    android:textColor="@color/tp_text_primary"
-                    android:textSize="14sp" />
-            </LinearLayout>
         </LinearLayout>
 
         <!-- Generated, so it always states where the video actually goes and what the team is
-             actually told. It is the whole of the configuration a pilot needs to read before a
-             flight; the rest is on the servers screen. -->
+             actually told. It is what a pilot reads before a flight; the server cards are
+             below it. -->
         <TextView
             android:id="@+id/videoSummary"
             android:layout_width="match_parent"
@@ -530,84 +710,30 @@
             android:textSize="13sp"
             android:text="" />
 
-        <Button
-            style="@style/TakButton.Neutral"
-            android:id="@+id/videoConfigureServers"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Configure Video Servers…" />
-
+        <!-- THE TWO SERVER CARDS ARE BACK ON THIS PAGE (design decision). They were
+             behind a "Configure Video Servers" button before. The lock above now sits
+             on the same page as everything it locks. -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="14dp"
             android:background="@color/tp_border" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="3. TAK Server Connection"
-            android:textColor="@color/tp_text_primary"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:paddingTop="16dp"
-            android:paddingBottom="16dp" />
+        <include layout="@layout/panel_video_servers" />
+        </LinearLayout>
 
-
-
-        <!-- THE SUMMARY. Everything that CONFIGURES the connection moved to
-             TakServerActivity; what stays is what a pilot READS before
-             a flight — who this aircraft is signed in as, and which channels it reaches. All
-             three lines are generated from the live state, so none of them can go stale the
-             way a typed label does. The button is the way in. -->
-        <TextView
-            android:id="@+id/takSummaryStatus"
+        <LinearLayout
+            android:id="@+id/pfTabMapData"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/tp_text_secondary"
-            android:textSize="13sp"
-            android:text="" />
-
-        <TextView
-            android:id="@+id/takSummaryChannels"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="@color/tp_text_tertiary"
-            android:textSize="12sp"
-            android:text="" />
-
-        <TextView
-            android:id="@+id/takSummaryElevated"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="@color/tp_text_tertiary"
-            android:textSize="12sp"
-            android:text="" />
-
-        <Button
-            style="@style/TakButton.Neutral"
-            android:id="@+id/takConfigureServer"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Configure TAK Server…" />
-
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="20dp"
-            android:background="@color/tp_border" />
+            android:orientation="vertical">
 
         <!-- 4. Elevation Data (DTED) — imported terrain regions for the local flight area.
              Feeds TerrainAgl + CameraSlantPoint's terrain-corrected SPoI. -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="4. Elevation Data (DTED)"
+            android:text="Terrain Elevation"
             android:textColor="@color/tp_text_primary"
             android:textSize="22sp"
             android:textStyle="bold"
@@ -617,7 +743,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Improves marker position accuracy. Import one .zip per area; re-importing replaces it."
+            android:text="Terrain data makes marker positions more accurate. Import one .zip file for each area. A second import of the same area replaces the first."
             android:textColor="@color/tp_text_tertiary"
             android:textSize="12sp"
             android:paddingBottom="8dp" />
@@ -634,14 +760,13 @@
                 android:layout_weight="1"
                 android:layout_marginEnd="8dp"
                 android:text="+ Import Region" />
-            <Button
-            style="@style/TakButton.Neutral"
-                android:id="@+id/dtedCleanButton"
+            <!-- "Clean Unused Tiles" was here. The clean runs after a region Delete now
+                 (design decision). The space keeps the Import button
+                 half wide. -->
+            <View
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Clean Unused Tiles"
-                android:textSize="12sp" />
+                android:layout_height="1dp"
+                android:layout_weight="1" />
         </LinearLayout>
 
         <LinearLayout
@@ -671,7 +796,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="5. FAA Airspace Ceilings (UASFM)"
+            android:text="FAA Ceilings"
             android:textColor="@color/tp_text_primary"
             android:textSize="22sp"
             android:textStyle="bold"
@@ -681,14 +806,14 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="FAA altitude ceilings, shown on the flight screen. Download on wifi before you travel.\n\n⚠ Advice only — NOT an authorisation, and it does not change the aircraft\u2019s altitude limit."
+            android:text="The flight screen shows the FAA altitude ceiling at your position. Download the data on Wi-Fi before you go.\n\n⚠ This is advice only. It is NOT an authorization to fly, and it does not change the max altitude of the aircraft."
             android:textColor="@color/tp_text_tertiary"
             android:textSize="12sp"
             android:paddingBottom="10dp" />
 
         <LinearLayout style="@style/takFormRow">
             <LinearLayout style="@style/takColumn">
-                <TextView style="@style/takLabelStyle" android:text="Centre latitude" />
+                <TextView style="@style/takLabelStyle" android:text="Center latitude" />
                 <EditText
                     android:id="@+id/uasfmLat"
                     style="@style/takFieldStyle"
@@ -697,7 +822,7 @@
             </LinearLayout>
 
             <LinearLayout style="@style/takColumn">
-                <TextView style="@style/takLabelStyle" android:text="Centre longitude" />
+                <TextView style="@style/takLabelStyle" android:text="Center longitude" />
                 <EditText
                     android:id="@+id/uasfmLon"
                     style="@style/takFieldStyle"
@@ -729,14 +854,12 @@
                 android:layout_marginEnd="8dp"
                 android:text="Use My Location"
                 android:textSize="12sp" />
-            <Button
-            style="@style/TakButton.Neutral"
-                android:id="@+id/uasfmCheckButton"
+            <!-- "Check Size" was here (design decision): the
+                 download shows the count, and an area with no FAA data says so when it ends. -->
+            <View
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Check Size"
-                android:textSize="12sp" />
+                android:layout_height="1dp"
+                android:layout_weight="1" />
         </LinearLayout>
 
         <LinearLayout
@@ -772,6 +895,184 @@
             android:textSize="13sp"
             android:text="" />
 
+        <!-- MAP DISPLAY: the source of the small map on the flight screen (design decision).
+             It was here once and was removed;
+             osmdroid takes any {z}/{x}/{y} address, so it is back.
+             Street and Hybrid save when touched. The address and its button are only for Custom,
+             so they show only while Custom is selected. See MapSource, MapSourceTiles. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/tp_border" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Map Display"
+            android:textColor="@color/tp_text_primary"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:paddingTop="16dp"
+            android:paddingBottom="4dp" />
+
+        <RadioGroup
+            android:id="@+id/mapStyleGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <RadioButton
+                android:id="@+id/mapStyleStreet"
+                style="@style/takColumnRadio"
+                android:buttonTint="@color/tp_btn_info"
+                android:text="Street" />
+            <RadioButton
+                android:id="@+id/mapStyleHybrid"
+                style="@style/takColumnRadio"
+                android:buttonTint="@color/tp_btn_info"
+                android:text="Hybrid" />
+            <RadioButton
+                android:id="@+id/mapStyleCustom"
+                style="@style/takColumnRadio"
+                android:buttonTint="@color/tp_btn_info"
+                android:text="Custom" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Hybrid shows satellite pictures with street names. Custom shows the map server of your team."
+            android:textColor="@color/tp_text_tertiary"
+            android:textSize="12sp"
+            android:paddingTop="2dp" />
+
+        <TextView
+            android:id="@+id/mapStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/tp_text_secondary"
+            android:textSize="13sp"
+            android:paddingTop="4dp" />
+
+        <LinearLayout
+            android:id="@+id/mapCustomBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+            <TextView style="@style/takLabelStyle"
+                android:paddingTop="8dp"
+                android:text="Address of your map server" />
+            <EditText
+                android:id="@+id/mapCustomUrl"
+                style="@style/takFieldStyle"
+                android:hint="https://host/path/{z}/{x}/{y}.png"
+                android:inputType="textUri" />
+            <Button
+                android:id="@+id/mapDisplaySaveButton"
+                style="@style/TakButton.Primary"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Save Map Address" />
+
+            <!-- THE CUSTOM MAP FOR USE WITH NO NETWORK (design decision). A center and a
+                 radius, 15 miles at most. No choice of
+                 detail: the download takes the best that fits in 1 GB. Only for Custom, so it is
+                 inside the Custom block. The download button is also the stop button while a
+                 download runs. Each area has a name, and the list below has one row for each,
+                 with Delete, as the terrain regions have. See CustomMapTiles, SavedMapTiles. -->
+            <TextView style="@style/takLabelStyle"
+                android:paddingTop="16dp"
+                android:text="Offline Map"
+                android:textColor="@color/tp_text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Save the custom map of an area on this controller. The flight screen then shows the map with no network. Use Wi-Fi for the download."
+                android:textColor="@color/tp_text_tertiary"
+                android:textSize="12sp" />
+
+            <LinearLayout style="@style/takFormRow">
+                <LinearLayout style="@style/takColumn"
+                    android:layout_weight="2">
+                    <TextView style="@style/takLabelStyle" android:text="Area name" />
+                    <EditText
+                        android:id="@+id/mapDlName"
+                        style="@style/takFieldStyle"
+                        android:hint="A name you will know, for example the town"
+                        android:inputType="textCapWords"
+                        android:maxLength="30" />
+                </LinearLayout>
+                <LinearLayout style="@style/takColumn">
+                    <TextView style="@style/takLabelStyle" android:text="Radius (mi, max 15)" />
+                    <EditText
+                        android:id="@+id/mapDlRadius"
+                        style="@style/takFieldStyle"
+                        android:hint="10"
+                        android:inputType="numberDecimal" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout style="@style/takFormRow">
+                <LinearLayout style="@style/takColumn">
+                    <TextView style="@style/takLabelStyle" android:text="Center latitude" />
+                    <EditText
+                        android:id="@+id/mapDlLat"
+                        style="@style/takFieldStyle"
+                        android:hint="45.0000"
+                        android:inputType="numberDecimal|numberSigned" />
+                </LinearLayout>
+                <LinearLayout style="@style/takColumn">
+                    <TextView style="@style/takLabelStyle" android:text="Center longitude" />
+                    <EditText
+                        android:id="@+id/mapDlLon"
+                        style="@style/takFieldStyle"
+                        android:hint="-100.0000"
+                        android:inputType="numberDecimal|numberSigned" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="10dp">
+                <Button
+                    android:id="@+id/mapDlUseLocation"
+                    style="@style/TakButton.Neutral"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="8dp"
+                    android:text="Use My Location" />
+                <Button
+                    android:id="@+id/mapDlDownload"
+                    style="@style/TakButton.Info"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Download Map" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/mapDlStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/tp_text_secondary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:id="@+id/mapDlList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="24dp" />
+        </LinearLayout>
+
         <!-- 6. Application Mode — Elevated or Basic (the stored value of Elevated is ENHANCED;
              see AppMode.label).
 
@@ -787,16 +1088,18 @@
 
              The rule is tp_border like every other section's: tp_hud_outline is
              the HUD's black edge and is black on this ground. -->
-        <View
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/pfTabMode"
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="20dp"
-            android:background="@color/tp_border" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="6. Application Mode"
+            android:text="Application Mode"
             android:textColor="@color/tp_text_primary"
             android:textSize="22sp"
             android:textStyle="bold"
@@ -820,6 +1123,8 @@
             android:layout_marginTop="8dp"
             android:layout_marginBottom="24dp"
             android:text="Change Mode…" />
+        </LinearLayout>
 
     </LinearLayout>
-</ScrollView>
+    </ScrollView>
+</LinearLayout>

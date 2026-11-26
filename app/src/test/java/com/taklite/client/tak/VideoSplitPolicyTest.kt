@@ -1,6 +1,7 @@
 package com.taklite.client.tak
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,6 +70,29 @@ class VideoSplitPolicyTest {
         assertNull(TakManager.videoFor("B", false, false, null))
     }
 
+    // ---- Which messages go on B ----
+
+    /** The pilot's uid on B tied it to B at the server, and a marker shared to the pilot was
+     *  lost. B carries everything else, or the video-only account loses the SPI and the
+     *  markers (design decision). A new kind must be decided here, not join B unseen. */
+    @Test
+    fun elevatedCarriesEverythingButThePilotReport() {
+        for (kind in TakManager.Outbound.values()) {
+            assertEquals(kind.name, kind != TakManager.Outbound.PILOT,
+                TakManager.elevatedCarries(kind))
+        }
+    }
+
+    @Test
+    fun elevatedCarriesTheSensorPoint() {
+        assertTrue(TakManager.elevatedCarries(TakManager.Outbound.SENSOR_POINT))
+    }
+
+    @Test
+    fun elevatedNeverCarriesThePilotReport() {
+        assertFalse(TakManager.elevatedCarries(TakManager.Outbound.PILOT))
+    }
+
     // ---- Structural: A's and B's drone XML describe the SAME aircraft, differing only in video ----
 
     @Test
@@ -84,6 +108,21 @@ class VideoSplitPolicyTest {
         assertTrue("uid=\"$droneUid\"" in xmlB)
         assertTrue("__video" !in xmlA)
         assertTrue("__video" in xmlB)
+    }
+
+    @Test
+    fun elevatedAircraftReportNamesNobody() {
+        val b = TakManager.withoutContactEndpoint(droneXml("UAS-BRAVO", url))
+        assertFalse(b, b.contains("endpoint="))
+        assertTrue(b, b.contains("<contact callsign="))
+        assertTrue(b, b.contains("<__video"))
+    }
+
+    @Test
+    fun withoutContactEndpointLeavesOtherMessagesAlone() {
+        val spi = CotBuilder.buildSensorPoint("spi-1", "UAS-BRAVO", "UAS", 1.0, 2.0, 100.0, Double.NaN)
+        assertEquals(spi, TakManager.withoutContactEndpoint(spi))
+        assertNull(TakManager.withoutContactEndpoint(null))
     }
 
     private fun droneXml(droneUid: String, videoUrl: String?): String = CotBuilder.buildDronePLI(

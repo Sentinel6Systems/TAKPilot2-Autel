@@ -33,7 +33,7 @@ class Pes(
   val bufferData: ByteBuffer
 ): MpegTsPayload(pid, isKeyFrame) {
 
-  private val headerLength = 14
+  private val headerLength = HEADER_LENGTH
 
   private val length = headerLength + bufferData.remaining()
   private val markerBits = 2
@@ -70,5 +70,10 @@ class Pes(
     buffer.put((((fourBits and 0xF).toInt() shl 4) or ((pts shr 29) and 0xE).toInt() or 1).toByte())
     buffer.putShort((((pts shr 14) and 0xFFFE) or 1).toShort())
     buffer.putShort((((pts shl 1) and 0xFFFE) or 1).toShort())
+  }
+
+  companion object {
+    /** Bytes [writeHeader] writes: 9 fixed + 5 of PTS. */
+    const val HEADER_LENGTH = 14
   }
 }

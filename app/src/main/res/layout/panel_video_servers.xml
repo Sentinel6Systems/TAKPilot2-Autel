@@ -1,46 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- VIDEO SERVERS — the set-once configuration, kept off Pre-Flight (design decision).
+<!-- THE TWO VIDEO SERVER CARDS, shown in the Video group of Pre-Flight.
+     This was its own screen, behind a "Configure Video
+     Servers" button: one column of twenty set-once controls was too long. The left rail gives
+     each group its own page, so the cards are back with the controls that go with them.
 
-     Pre-Flight keeps only what changes: the video quality, and which server is active. Every
-     other video setting is entered one time and then locked, and putting twenty of them in a
-     column made the sub-sections easy to mix up.
+     THE TWO SERVERS ARE SIDE BY SIDE, and that is the point. Each field writes its own
+     server, so "which server do I change" is never a question.
 
-     THE TWO SERVERS ARE SIDE BY SIDE, and that is the point. On Pre-Flight the fields belonged
-     to whichever server the radio above them selected, so nothing on the screen said which one
-     was being edited once the pilot had scrolled into them. Both are visible here and each
-     field writes its own server.
-
-     The LOCK stays on Pre-Flight: it guards the active-server toggle as well as these fields,
-     and unlocking asks for confirmation. This screen reads it and refuses touches. -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/tp_bg_screen"
-    android:fillViewport="true">
-
-    <LinearLayout
+     No ScrollView here: the Pre-Flight page scrolls. The lock is the "Lock configuration"
+     box in the title row of the Video group. VideoServersPanel binds the cards. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
-
-        <LinearLayout
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:gravity="center_vertical"
-            android:paddingBottom="10dp">
-            <TextView
-                android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Video Servers"
-                android:textColor="@color/tp_text_primary"
-                android:textSize="22sp" android:textStyle="bold" />
-            <TextView
-                android:id="@+id/vsLockNotice"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:textColor="@color/tp_text_secondary" android:textSize="13sp"
-                android:text="Locked in Pre-Flight"
-                android:visibility="gone" />
-        </LinearLayout>
+        android:paddingTop="12dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -53,7 +26,7 @@
              its own slot directly — no active-slot binding, which is what made this
              ambiguous on Pre-Flight.
              The id is for BASIC: with card 2 GONE this card drops its 10dp end margin, so it
-             really does take the full width (VideoServersActivity.onCreate). -->
+             really does take the full width (VideoServersPanel.bind). -->
         <LinearLayout
             android:id="@+id/vs1Card"
             android:layout_width="0dp"
@@ -97,7 +70,7 @@
                 <LinearLayout style="@style/takColumn">
                     <TextView style="@style/takLabelStyle" android:text="Broadcast ID" />
                     <EditText android:id="@+id/vs1StreamId" style="@style/takFieldStyle"
-                        android:hint="UAS-CALLSIGN" android:inputType="text" />
+                        android:hint="UAS-CALLSIGN" android:inputType="text|textNoSuggestions" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -108,11 +81,11 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:buttonTint="@color/tp_btn_info"
                 android:textColor="@color/tp_text_primary" android:textSize="13sp"
-                android:text="Randomize stream path (new token each app launch)" />
+                android:text="Random stream path (new each time the app starts)" />
             <TextView
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:paddingStart="32dp" android:paddingEnd="0dp"
-                android:text="The path gets a random token that changes each time the app is launched. It stays the same for the whole session."
+                android:text="The app adds a random code to the path each time it starts. The path stays the same until you close the app."
                 android:textColor="@color/tp_text_secondary" android:textSize="11sp" />
 
             <TextView style="@style/takLabelStyle" android:text="Stream path (touch to copy)" android:paddingTop="6dp" />
@@ -267,7 +240,7 @@
                 <TextView
                     android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:paddingTop="2dp"
-                    android:text="The server's READ passphrase, which is not always the publish one. Leave it empty if the read path has none."
+                    android:text="The passphrase that the team needs to play the video. It can be different from the SRT passphrase above. Leave it empty if the server has none."
                     android:textColor="@color/tp_text_secondary" android:textSize="11sp" />
             </LinearLayout>
 
@@ -346,7 +319,7 @@
                 <LinearLayout style="@style/takColumn">
                     <TextView style="@style/takLabelStyle" android:text="Broadcast ID" />
                     <EditText android:id="@+id/vs2StreamId" style="@style/takFieldStyle"
-                        android:hint="UAS-CALLSIGN" android:inputType="text" />
+                        android:hint="UAS-CALLSIGN" android:inputType="text|textNoSuggestions" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -357,11 +330,11 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:buttonTint="@color/tp_btn_info"
                 android:textColor="@color/tp_text_primary" android:textSize="13sp"
-                android:text="Randomize stream path (new token each app launch)" />
+                android:text="Random stream path (new each time the app starts)" />
             <TextView
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:paddingStart="32dp" android:paddingEnd="0dp"
-                android:text="The path gets a random token that changes each time the app is launched. It stays the same for the whole session."
+                android:text="The app adds a random code to the path each time it starts. The path stays the same until you close the app."
                 android:textColor="@color/tp_text_secondary" android:textSize="11sp" />
 
             <TextView style="@style/takLabelStyle" android:text="Stream path (touch to copy)" android:paddingTop="6dp" />
@@ -512,7 +485,7 @@
                 <TextView
                     android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:paddingTop="2dp"
-                    android:text="The server's READ passphrase, which is not always the publish one. Leave it empty if the read path has none."
+                    android:text="The passphrase that the team needs to play the video. It can be different from the SRT passphrase above. Leave it empty if the server has none."
                     android:textColor="@color/tp_text_secondary" android:textSize="11sp" />
             </LinearLayout>
 
@@ -542,5 +515,4 @@
         </LinearLayout>
 
         </LinearLayout>
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>

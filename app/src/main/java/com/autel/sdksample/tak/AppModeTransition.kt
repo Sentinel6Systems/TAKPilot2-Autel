@@ -99,12 +99,12 @@ object AppModeTransition {
         // 1. EVERY PREFERENCE, IN ONE EDITOR, BEFORE ANYTHING LIVE IS TOUCHED.
         //    Writing the mode, chb_enabled and the slot through separate editors lets a
         //    process death between them persist BASIC with chb_enabled still true
-        //    and Server 2 still on the wire — a state TakServerActivity's own dial then acted on.
+        //    and Server 2 still on the wire — a state TakServerPanel's own dial then acted on.
         //    One editor is atomic. Every pref here is a gate input, and the live teardown below
         //    still runs after all of them.
-        val activeSlot = if (prefs.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 1) == 2) 2 else 1
-        val s1Advertise = prefs.getString(VideoServersActivity.vKey(1, "advertise"),
-            VideoServersActivity.ADV_SELF) ?: VideoServersActivity.ADV_SELF
+        val activeSlot = if (prefs.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 1) == 2) 2 else 1
+        val s1Advertise = prefs.getString(VideoServersPanel.vKey(1, "advertise"),
+            VideoServersPanel.ADV_SELF) ?: VideoServersPanel.ADV_SELF
         val e = prefs.edit()
             .putString(AppMode.KEY_MODE, AppMode.BASIC.name)
             // The snapshot: what BASIC is about to mute, so ENHANCED can unmute it.
@@ -128,7 +128,7 @@ object AppModeTransition {
         //    but the streamer reads the PLAIN video_* keys, which only the mirror writes, and a
         //    pilot can reach LIVE without opening a screen that mirrors. Do not rely on the
         //    COINCIDENCE that Pre-Flight's setup ends in a mirror.
-        VideoServersActivity.mirrorActiveSlot(prefs)
+        VideoServersPanel.mirrorActiveSlot(prefs)
     }
 
     private fun toEnhanced(prefs: SharedPreferences, redialElevated: () -> Unit) {
@@ -141,17 +141,17 @@ object AppModeTransition {
         if (prefs.getBoolean(KEY_SNAP_TAKEN, false)) {
             restoreElevated = prefs.getBoolean(KEY_SNAP_CHB_ENABLED, false)
             e.putBoolean(TakAutoConnect.KEY_CHB_ENABLED, restoreElevated)
-            e.putInt(VideoServersActivity.KEY_V_ACTIVE_SLOT,
+            e.putInt(VideoServersPanel.KEY_V_ACTIVE_SLOT,
                 if (prefs.getInt(KEY_SNAP_ACTIVE_SLOT, 1) == 2) 2 else 1)
             // The advertisement comes back ONLY if it is still the value BASIC forced. A pilot
             // who changed it while in BASIC chose something; the snapshot does not get to
             // overrule a choice made after it.
-            val advKey = VideoServersActivity.vKey(1, "advertise")
+            val advKey = VideoServersPanel.vKey(1, "advertise")
             val snapAdv = prefs.getString(KEY_SNAP_S1_ADVERTISE, null)
-            if (snapAdv == VideoServersActivity.ADV_OTHER &&
-                prefs.getString(advKey, null) == VideoServersActivity.ADV_OFF
+            if (snapAdv == VideoServersPanel.ADV_OTHER &&
+                prefs.getString(advKey, null) == VideoServersPanel.ADV_OFF
             ) {
-                e.putString(advKey, VideoServersActivity.ADV_OTHER)
+                e.putString(advKey, VideoServersPanel.ADV_OTHER)
             }
             // ⚠ THE LOCKS COME BACK. BASIC unlocks with no confirmation, so a lock cleared while in
             // BASIC used to STAY cleared after the return: a managed controller handed back
@@ -173,7 +173,7 @@ object AppModeTransition {
         }
         e.apply()
         clearStaleVideoUrl()
-        VideoServersActivity.mirrorActiveSlot(prefs)
+        VideoServersPanel.mirrorActiveSlot(prefs)
         if (restoreElevated) redialElevated()
     }
 
@@ -195,7 +195,7 @@ object AppModeTransition {
         val e = prefs.edit()
         forceBasicPrefs(prefs, e)
         e.apply()
-        VideoServersActivity.mirrorActiveSlot(prefs)
+        VideoServersPanel.mirrorActiveSlot(prefs)
     }
 
     /** chb_enabled off, and [forceSingleVideoServer] — into a caller's editor. */
@@ -224,16 +224,16 @@ object AppModeTransition {
      * mirror too, or the stream never sees it.
      */
     internal fun forceSingleVideoServer(prefs: SharedPreferences, e: SharedPreferences.Editor) {
-        if (prefs.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 1) != 1) {
+        if (prefs.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 1) != 1) {
             AppLog.i(TAG, "Basic: active video server forced to 1")
-            e.putInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 1)
+            e.putInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 1)
         }
-        val advKey = VideoServersActivity.vKey(1, "advertise")
-        if (prefs.getString(advKey, VideoServersActivity.ADV_SELF) ==
-            VideoServersActivity.ADV_OTHER
+        val advKey = VideoServersPanel.vKey(1, "advertise")
+        if (prefs.getString(advKey, VideoServersPanel.ADV_SELF) ==
+            VideoServersPanel.ADV_OTHER
         ) {
             AppLog.i(TAG, "Basic: advertisement was 'other' (a hidden server) — set to off")
-            e.putString(advKey, VideoServersActivity.ADV_OFF)
+            e.putString(advKey, VideoServersPanel.ADV_OFF)
         }
     }
 
@@ -248,7 +248,7 @@ object AppModeTransition {
 
     /**
      * Which server the CoT advertises, or null when the advertisement is off — computed EXACTLY
-     * as [VideoServersActivity.mirrorActiveSlot] computes it: from the ACTIVE slot's own
+     * as [VideoServersPanel.mirrorActiveSlot] computes it: from the ACTIVE slot's own
      * `advertise` key. Pure, so the disclosure and the summaries can never disagree with the
      * wire.
      */
@@ -261,8 +261,8 @@ object AppModeTransition {
         // nothing is advertised whatever the advertise key says.
         if (hostsKnown && (if (slot == 2) host2 else host1).isNullOrBlank()) return null
         return when (if (slot == 2) adv2 else adv1) {
-            VideoServersActivity.ADV_OFF -> null
-            VideoServersActivity.ADV_OTHER -> if (slot == 1) 2 else 1
+            VideoServersPanel.ADV_OFF -> null
+            VideoServersPanel.ADV_OTHER -> if (slot == 1) 2 else 1
             else -> slot // "self", and the unset default
         }
     }
@@ -303,12 +303,12 @@ object AppModeTransition {
         emergencyActive: Boolean = false,
     ): Facts {
         val enrolled = hasElevatedEnrollment && !prefs.getBoolean("chb_logged_out", false)
-        val slotNow = if (prefs.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 1) == 2) 2 else 1
-        val adv1 = prefs.getString(VideoServersActivity.vKey(1, "advertise"), null)
-        val adv2 = prefs.getString(VideoServersActivity.vKey(2, "advertise"), null)
+        val slotNow = if (prefs.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 1) == 2) 2 else 1
+        val adv1 = prefs.getString(VideoServersPanel.vKey(1, "advertise"), null)
+        val adv2 = prefs.getString(VideoServersPanel.vKey(2, "advertise"), null)
         val snap = prefs.getBoolean(KEY_SNAP_TAKEN, false)
-        val host1 = prefs.getString(VideoServersActivity.vKey(1, "host"), null)
-        val host2 = prefs.getString(VideoServersActivity.vKey(2, "host"), null)
+        val host1 = prefs.getString(VideoServersPanel.vKey(1, "host"), null)
+        val host2 = prefs.getString(VideoServersPanel.vKey(2, "host"), null)
         // The state AFTER, by the same rules toBasic / toEnhanced apply.
         var slotAfter = slotNow
         var adv1After = adv1
@@ -317,13 +317,13 @@ object AppModeTransition {
         when (target) {
             AppMode.BASIC -> {
                 slotAfter = 1
-                if (adv1 == VideoServersActivity.ADV_OTHER) adv1After = VideoServersActivity.ADV_OFF
+                if (adv1 == VideoServersPanel.ADV_OTHER) adv1After = VideoServersPanel.ADV_OFF
             }
             AppMode.ENHANCED -> if (snap) {
                 slotAfter = if (prefs.getInt(KEY_SNAP_ACTIVE_SLOT, 1) == 2) 2 else 1
-                if (prefs.getString(KEY_SNAP_S1_ADVERTISE, null) == VideoServersActivity.ADV_OTHER &&
-                    adv1 == VideoServersActivity.ADV_OFF
-                ) adv1After = VideoServersActivity.ADV_OTHER
+                if (prefs.getString(KEY_SNAP_S1_ADVERTISE, null) == VideoServersPanel.ADV_OTHER &&
+                    adv1 == VideoServersPanel.ADV_OFF
+                ) adv1After = VideoServersPanel.ADV_OTHER
                 returns = enrolled && prefs.getBoolean(KEY_SNAP_CHB_ENABLED, false)
                 locks = LOCK_KEYS.count {
                     prefs.getBoolean(snapLockKey(it), false) && !prefs.getBoolean(it, false)
@@ -401,7 +401,7 @@ object AppModeTransition {
                 f.elevatedEnrolled -> {
                     append("Elevated mode allows a second TAK account and a second video server.\n\n")
                     append("The Elevated account is set up but stays switched off. Switch it on ")
-                    append("in Configure TAK Server to send the video link only to its channel.")
+                    append("in the TAK group of Pre-Flight to send the video link only to its channel.")
                     if (video) append(" Until then every active channel gets the video link.")
                 }
                 else -> {
@@ -411,7 +411,7 @@ object AppModeTransition {
                     // the return STARTS the link on every channel.
                     if (video) append(", so every active channel ")
                         .append(if (f.advertNow != null) "keeps getting" else "will get")
-                        .append(" the video link until one is set up in Configure TAK Server")
+                        .append(" the video link until one is set up in the TAK group of Pre-Flight")
                     append(".")
                 }
             }

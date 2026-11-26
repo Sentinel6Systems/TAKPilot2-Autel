@@ -82,7 +82,20 @@ public class CotBuilder {
      */
     private static final String VEHICLE_TYPE_TAG = "_AUTEL_";
     private static final String VEHICLE_TYPE = "AUTEL";
-    private static final String SENSOR_MODEL = "EVO2";
+
+    /**
+     * The aircraft MODEL in the {@code <sensor>} tag. The one part of the identity that can
+     * follow the aircraft connected: an application that flies more than one airframe type
+     * sets it from the airframe it detects. The
+     * value here is the one in use until it does, and an application with one airframe never
+     * calls the setter.
+     */
+    private static volatile String sensorModel = "EVO2";
+
+    /** Sets the {@code <sensor>} model. A null or blank name is refused, not sent. */
+    public static void setSensorModel(String model) {
+        if (model != null && !model.trim().isEmpty()) sensorModel = model;
+    }
 
     static {
         COT_DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
@@ -298,7 +311,7 @@ public class CotBuilder {
             sb.append(" roll=\"0\"");
             sb.append(" range=\"").append((int) Math.round(sensorRange)).append("\"");
             sb.append(" azimuth=\"").append(sensorAzimuth).append("\"");
-            sb.append(" model=\"").append(SENSOR_MODEL).append("\"");
+            sb.append(" model=\"").append(escapeXml(sensorModel)).append("\"");
             sb.append(" fov=\"").append(sensorFov).append("\"");
             sb.append(" type=\"r-e\"");
             sb.append(" version=\"0.6\" />");

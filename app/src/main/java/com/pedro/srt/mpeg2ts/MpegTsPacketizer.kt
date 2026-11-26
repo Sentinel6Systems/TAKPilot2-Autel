@@ -76,15 +76,27 @@ class MpegTsPacketizer(private val psiManager: PsiManager) {
           writeHeader(buffer, true, mpegTsPayload.pid, adaptationFieldControl, pesContinuity)
           val isAudio = psiManager.getAudioPid().toInt() == mpegTsPayload.pid
           val pcr = if (isAudio && !mpegTsPayload.isKeyFrame) null else TimeUtils.getCurrentTimeMicro()
+          val data = mpegTsPayload.bufferData
+          // ⚠ A FRAME THAT FITS IN ITS FIRST PACKET GETS ITS STUFFING HERE, IN THE ADAPTATION
+          // FIELD (TAKPILOT2 CHANGE). The "last packet" branch below writes its
+          // stuffing as a new adaptation field right after the 4-byte TS header, which is right
+          // for a continuation packet. In the FIRST packet the adaptation field and the PES
+          // header are already written, so that branch put the stuffing INSIDE the payload,
+          // in front of the frame, and set a bit in the last PTS byte. Every frame under 162
+          // bytes went out corrupt; the receiver lost it and every frame after it up to the next
+          // keyframe (H.265: green or grey picture; H.264: a smeared picture). Some encoders
+          // make many frames that small.
+          val firstRoom = packetSize - 4 - AdaptationField(pcr = pcr).getSize() - Pes.HEADER_LENGTH
+          val firstStuffing = (firstRoom - data.remaining()).coerceAtLeast(0)
           val adaptationField = AdaptationField(
             discontinuityIndicator = false,
             randomAccessIndicator = mpegTsPayload.isKeyFrame, //only video can be true
-            pcr = pcr
+            pcr = pcr,
+            stuffingBytes = if (firstStuffing > 0) ByteArray(firstStuffing) { 0xFF.toByte() } else null
           )
           buffer.put(adaptationField.getData())
           mpegTsPayload.writeHeader(buffer)
 
-          val data = mpegTsPayload.bufferData
           while (data.hasRemaining()) {
             if (isFirstPacket) {
               isFirstPacket = false
@@ -93,7 +105,7 @@ class MpegTsPacketizer(private val psiManager: PsiManager) {
               writeHeader(buffer, false, mpegTsPayload.pid, adaptationFieldControl, pesContinuity)
             }
             val size = minOf(data.remaining(), buffer.remaining())
-            if (size < buffer.remaining()) { //last packet
+            if (size < buffer.remaining()) { //last packet, never the first: see firstStuffing
               val stuffingSize = buffer.remaining() - data.remaining()
               //override AdaptationFieldControl.PAYLOAD to AdaptationFieldControl.ADAPTATION_PAYLOAD
               val byte = buffer.get(buffer.position() - 1)

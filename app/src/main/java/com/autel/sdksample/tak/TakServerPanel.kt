@@ -1,6 +1,6 @@
 package com.autel.sdksample.tak
 
-import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -14,13 +14,14 @@ import java.io.File
 import java.util.UUID
 
 /**
- * The TAK server connection — BOTH ACCOUNTS — moved off Pre-Flight.
+ * The TAK server connection — BOTH ACCOUNTS — in the TAK group of Pre-Flight.
  *
- * Same move, and the same reasoning, that [VideoServersActivity] made for the video settings.
- * Pre-Flight keeps what a pilot READS before a flight: which user this aircraft is
- * signed in as, and which channels it reaches. Everything that CONFIGURES the connection — two
- * enrollments, six fields, two channel lists and the lock — is entered once and then locked, and
- * a column of it on the main screen buried the things that actually change.
+ * ⚠ THIS WAS A SCREEN OF ITS OWN (`TakServerActivity`), behind a
+ * "Configure TAK Server" button, because a column of it on the one long Pre-Flight page buried
+ * the things that change. Pre-Flight now has a left rail and shows one group at a time, so the
+ * configuration is on the TAK page again, below the generated summary. This class is not an
+ * Activity: [TakConnectActivity] owns the views, calls [bind] one time, and calls [release]
+ * from its onDestroy.
  *
  * ## The two accounts
  *
@@ -31,16 +32,14 @@ import java.util.UUID
  *
  * They share the host and both ports: one controller, two certificates.
  *
- * ## What this screen does NOT own
+ * ## What this panel does NOT own
  *
  *  - **The split policy.** `TakManager.videoFor` decides which connection carries the video
- *    url. This screen only decides whether a second connection exists at all.
+ *    url. This panel only decides whether a second connection exists at all.
  *  - **The channel state.** The server holds it. Both lists are mirrors that follow it, and a
  *    tick is a request, not a local truth — the list is read again after every write.
  *
- * ⚠ **THE LOCK CAME WITH IT.** The video screen left its lock on Pre-Flight because that screen
- * kept an active-server toggle for it to guard. Nothing of the TAK configuration stayed behind,
- * so the lock moved here, and Pre-Flight's TAK section has no control for a lock to protect.
+ * ⚠ **THE TAK LOCK IS IN THE TITLE ROW OF THE TAK GROUP**, and [bind] sets it up last.
  *
  * ⚠ **NOTHING MIGRATED.** Every preference key below is the key Pre-Flight already wrote and
  * every view id is the id it had there, so a controller that upgrades finds its server
@@ -50,19 +49,34 @@ import java.util.UUID
  * retry the TAK connection on the way past, and that retry left with these fields. It now lives
  * in [TakAutoConnect.retryIfDown], called from the RESUME of the home screen and of Pre-Flight —
  * read that method before changing where it is called from.
+ *
+ * @param onChanged called when the connection or the channels change. The host paints its
+ *   generated summaries again.
+ * @param onVideoIdsChanged called when a new callsign changed a video Broadcast ID. The video
+ *   cards are on the same screen and must show the new value.
  */
-class TakServerActivity : AppCompatActivity() {
+class TakServerPanel(
+    private val activity: AppCompatActivity,
+    private val onChanged: () -> Unit = {},
+    private val onVideoIdsChanged: () -> Unit = {},
+) {
+
+    // The code below was written inside an Activity. These names keep it unchanged.
+    private val applicationContext: android.content.Context get() = activity.applicationContext
+    private val filesDir: java.io.File get() = activity.filesDir
+    private val MODE_PRIVATE = android.content.Context.MODE_PRIVATE
+    private fun getSharedPreferences(name: String, mode: Int) =
+        activity.getSharedPreferences(name, mode)
+    private fun <T : View?> findViewById(id: Int): T = activity.findViewById<T>(id)
+    /** A late answer from the network must not touch the views of a screen that is gone. */
+    private fun runOnUiThread(block: () -> Unit) =
+        activity.runOnUiThread { if (!activity.isDestroyed) block() }
 
     private lateinit var status: TextView
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_tak_server)
-        AppLog.v(TAG, "onCreate")
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            setHomeAsUpIndicator(R.drawable.ic_menu)
-        }
+    /** Wires the panel. Call ONE time, after the layout is set and before the host's locks. */
+    fun bind() {
+        AppLog.v(TAG, "bind")
 
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
 
@@ -89,6 +103,12 @@ class TakServerActivity : AppCompatActivity() {
         cotPort.setText(prefs.getInt(KEY_COT_PORT, 8089).toString())
         username.setText(prefs.getString(KEY_USERNAME, ""))
         callsign.setText(prefs.getString(KEY_CALLSIGN, "TAKPilot2-EVO2"))
+        // Letters, digits, - and _ only: the video Broadcast ID takes the
+        // callsign by default, and a space there broke a stream. See SafeName.
+        SafeNameField.attach(callsign)
+        // An eye in each password field, so a pilot can check what was typed (PasswordEye).
+        PasswordEye.attach(password)
+        PasswordEye.attach(findViewById(R.id.takVideoPassword))
 
         // Camera look-point toggle (applies live to the running bridge + persists).
         val cameraPoint = findViewById<android.widget.CheckBox>(R.id.takCameraPoint)
@@ -111,13 +131,12 @@ class TakServerActivity : AppCompatActivity() {
         // AND read them again when TAK connects. The refresh above needs a connection, so a
         // screen opened before TAK is up would otherwise show an empty list for ever.
         //
-        // ⚠ THE LISTENERS HOLD THIS ACTIVITY. TakManager outlives the screen, so they are
-        // removed in onDestroy below. Without that this Activity leaks and its dead views are
-        // repainted.
+        // ⚠ THE LISTENERS HOLD THE HOST ACTIVITY. TakManager outlives the screen, so they are
+        // removed in release(), from the host's onDestroy. Without that the Activity leaks and
+        // its dead views are repainted.
         TakManager.getInstance().addListener(connectionListener)
 
-        // Reflect live state on open, and silently reconnect with saved certs if the socket is
-        // not up — so the pilot never has to re-enter credentials or re-enroll.
+        // Reflect live state on open.
         when {
             TakManager.getInstance().isConnected -> {
                 // Track it, so connectionListener can correct this line if the link later drops
@@ -126,10 +145,16 @@ class TakServerActivity : AppCompatActivity() {
                 setStatus("Connected. Sending the aircraft position to TAK.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go))
             }
             prefs.getBoolean(KEY_LOGGED_OUT, false) ->
-                setStatus("Logged out. Enter host, username and password to sign in.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
+                setStatus("Logged out. Type the host, the username and the password to sign in.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
             hasSavedCerts(prefs) -> {
-                setStatus("Reconnecting with saved enrollment …", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
-                reconnectFromSaved(prefs, callsign.text.toString().trim().ifEmpty { "TAKPilot2-EVO2" })
+                // ⚠ NO DIAL FROM HERE ANY MORE. As a screen
+                // of its own this code dialled when it opened. It is now part of Pre-Flight,
+                // whose onResume calls TakAutoConnect.retryIfDown at the same moment, and
+                // TakManager.connect() is not reentrant: two dials at once can leave a second
+                // socket thread that publishes for the same uid. One dial, from the host. This
+                // line only says so, and connectionListener paints the result.
+                trackedCallsign = callsign.text.toString().trim().ifEmpty { "TAKPilot2-EVO2" }
+                setStatus("Connecting again with the saved enrollment…", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
             }
             else -> setStatus("Not connected.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
         }
@@ -145,11 +170,24 @@ class TakServerActivity : AppCompatActivity() {
             val u = username.text.toString().trim()
             val p = password.text.toString()
             val cs = callsign.text.toString().trim().ifEmpty { "TAKPilot2-EVO2" }
+            if (!SafeName.isValid(cs)) {
+                setStatus("The callsign takes letters, digits, - and _ only. " +
+                    "Not allowed: ${SafeName.badChars(cs)}.",
+                    androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
+                setConnectBusy(false)
+                return@setOnClickListener
+            }
             val ep = enrollPort.text.toString().trim().toIntOrNull() ?: 8446
             val cp = cotPort.text.toString().trim().toIntOrNull() ?: 8089
 
             if (TakManager.getInstance().isConnected) {
-                setStatus("Already connected.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go))
+                val savedCallsign = prefs.getString(KEY_CALLSIGN, "TAKPilot2-EVO2") ?: "TAKPilot2-EVO2"
+                if (cs == savedCallsign) {
+                    setStatus("Already connected.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go))
+                    setConnectBusy(false)
+                    return@setOnClickListener
+                }
+                changeCallsignWhileConnected(prefs, savedCallsign, cs)
                 setConnectBusy(false)
                 return@setOnClickListener
             }
@@ -158,13 +196,14 @@ class TakServerActivity : AppCompatActivity() {
             // pilots reading "enrollment failed" as a server or credential fault
             // when the controller simply had no network. Guards both paths below: fresh
             // enrollment and reconnect-from-saved both need the network.
-            if (!NetworkStatus.hasInternet(this)) {
+            if (!NetworkStatus.hasInternet(activity)) {
                 AppLog.w(TAG, "Connect blocked: no validated network")
-                setStatus("No network connection. Connect the controller to wifi first — " +
-                    "check the WIFI line on the home screen.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
+                setStatus("No network connection. Connect the controller to Wi-Fi first. " +
+                    "Check the WIFI line on the home screen.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
                 setConnectBusy(false)
                 return@setOnClickListener
             }
+            val prefsCallsignBefore = prefs.getString(KEY_CALLSIGN, null)
             prefs.edit()
                 .putString(KEY_HOST, h.ifEmpty { prefs.getString(KEY_HOST, "") })
                 .putInt(KEY_ENROLL_PORT, ep)
@@ -172,6 +211,7 @@ class TakServerActivity : AppCompatActivity() {
                 .putString(KEY_USERNAME, u.ifEmpty { prefs.getString(KEY_USERNAME, "") })
                 .putString(KEY_CALLSIGN, cs)
                 .apply()
+            followCallsignInVideo(prefs, oldCallsign = prefsCallsignBefore, newCallsign = cs)
 
             // If we already enrolled before, reconnect with saved certs — no password needed.
             if (hasSavedCerts(prefs) && p.isEmpty()) {
@@ -179,7 +219,7 @@ class TakServerActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             if (h.isEmpty() || u.isEmpty() || p.isEmpty()) {
-                setStatus("Host, username and password are required for first enrollment.",
+                setStatus("The first enrollment needs the host, the username and the password.",
                     androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
                 setConnectBusy(false)
                 return@setOnClickListener
@@ -221,7 +261,7 @@ class TakServerActivity : AppCompatActivity() {
             runCatching { findViewById<android.widget.LinearLayout>(R.id.takVideoChannelsList).removeAllViews() }
             latestVideoChannels = emptyList()
             setVideoChannelStatus("", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
-            setStatus("Logged out. Enter host, username and password to sign in as another user.",
+            setStatus("Logged out. Type the host, the username and the password to sign in as a different user.",
                 androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
         }
 
@@ -231,23 +271,62 @@ class TakServerActivity : AppCompatActivity() {
         setupTakLock()
     }
 
-    override fun onDestroy() {
-        // The listeners hold this Activity. TakManager outlives the screen, thus leaving them
-        // attached leaks the whole Activity and repaints views that are gone.
+    /** Call from the host's onDestroy. The listeners hold the host Activity. TakManager outlives
+     *  the screen, thus leaving them attached leaks the whole Activity and repaints views that
+     *  are gone. */
+    fun release() {
         runCatching { TakManager.getInstance().removeGroupChangeListener(groupChangeListener) }
         runCatching { TakManager.getInstance().removeListener(connectionListener) }
-        super.onDestroy()
-    }
-
-    /** The action-bar menu button returns to Pre-Flight, the screen that sent us here. */
-    override fun onSupportNavigateUp(): Boolean {
-        AppLog.v(TAG, "menu tapped — back to Pre-Flight")
-        finish()
-        return true
     }
 
     /**
-     * The TAK configuration lock, now the only lock on this screen.
+     * A NEW CALLSIGN WITHOUT A LOG OUT.
+     *
+     * Before this, the button answered "Already connected." and the callsign did not change
+     * until the pilot logged out and enrolled again with the password. The certificates do not
+     * depend on the callsign, so the saved enrollment connects again under the new name.
+     *
+     * The connection is made again by [TakAutoConnect.reconnect], the one path that also
+     * starts the bridge and the service with the callsign from the preferences. It refuses a
+     * second attempt while one is in progress.
+     *
+     * ⚠ NOT WHILE THE VIDEO IS LIVE OR THE AIRCRAFT FLIES. The reconnect closes the socket that
+     * carries the aircraft's position and starts the bridge again. The flying state is the
+     * bridge's cached flag, [AutelTakBridge.airborne], the same reading Change Mode uses.
+     */
+    private fun changeCallsignWhileConnected(
+        prefs: android.content.SharedPreferences, oldCallsign: String, newCallsign: String,
+    ) {
+        val danger = androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger)
+        if (VideoStreamerHolder.isActive) {
+            setStatus("Stop LIVE before you change the callsign.", danger)
+            return
+        }
+        if (AutelTakBridge.airborne) {
+            setStatus("The aircraft is flying. Land before you change the callsign.", danger)
+            return
+        }
+        if (TakAutoConnect.connecting) {
+            setStatus("A connection attempt is in progress. Touch the button again in a moment.",
+                androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_unknown))
+            return
+        }
+        AppLog.i(TAG, "callsign changed while connected — reconnecting with the saved enrollment")
+        prefs.edit().putString(KEY_CALLSIGN, newCallsign).apply()
+        followCallsignInVideo(prefs, oldCallsign = oldCallsign, newCallsign = newCallsign)
+        trackedCallsign = newCallsign
+        if (TakAutoConnect.reconnect(applicationContext)) {
+            setStatus("Callsign changed to \"$newCallsign\". Connecting again…",
+                androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_unknown))
+        } else {
+            setStatus("The callsign is saved, but the connection did not start again. " +
+                "Touch the button again.", danger)
+        }
+        onChanged()
+    }
+
+    /**
+     * The TAK configuration lock. Its box is in the title row of the TAK group.
      *
      * The channel rows are built in code, so [ConfigLock.apply] cannot reach them by id — they
      * are painted again instead, and each row reads the lock as it is built. BOTH lists need
@@ -255,11 +334,16 @@ class TakServerActivity : AppCompatActivity() {
      */
     private fun setupTakLock() {
         ConfigLock.install(
-            this, R.id.takLockConfig, TakConnectActivity.KEY_TAK_LOCKED, takLockedFields,
+            activity, R.id.takLockConfig, TakConnectActivity.KEY_TAK_LOCKED, takLockedFields,
             "Unlock TAK server settings?",
             "The lock prevents an accidental change to a server that works. " +
                 "A wrong value stops the aircraft sending data to your team.",
-            afterChange = {
+            afterChange = { locked ->
+                // A locked password field is disabled, so its eye cannot show it. Mask it too,
+                // or a field shown before the lock stays readable behind it.
+                if (locked) listOf(R.id.takPassword, R.id.takVideoPassword).forEach { id ->
+                    findViewById<EditText?>(id)?.let { PasswordEye.mask(it) }
+                }
                 renderChannels(latestChannels)
                 if (latestVideoChannels.isNotEmpty()) renderVideoChannels(latestVideoChannels)
             },
@@ -383,7 +467,7 @@ class TakServerActivity : AppCompatActivity() {
             prefs.edit().putString(KEY_UID, uid).apply()
         }
         if (host.isEmpty() || ts.isEmpty() || cc.isEmpty()) {
-            setStatus("Saved enrollment incomplete — enroll again.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
+            setStatus("The saved enrollment is not complete. Enroll again.", androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
             setConnectBusy(false)
             return
         }
@@ -593,7 +677,7 @@ class TakServerActivity : AppCompatActivity() {
     /** Re-reads the Elevated account's channels and repaints. Mirrors [refreshChannels]. */
     private fun refreshVideoChannels() {
         // One reader for the Elevated list, shared with the flight screen's dialog.
-        TakMissionManager.listElevatedChannels(this) { chans -> renderVideoChannels(chans ?: return@listElevatedChannels) }
+        TakMissionManager.listElevatedChannels(activity) { chans -> renderVideoChannels(chans ?: return@listElevatedChannels) }
     }
 
     /**
@@ -663,7 +747,7 @@ class TakServerActivity : AppCompatActivity() {
                 // delete the saved enrollment (that's clearVideoEnrollment's job, on full Log
                 // Out); switching back on reconnects from the same saved certs.
                 ElevatedChannel.clear()
-                setVideoChannelStatus("Elevated account off — video goes out on the Standard account again.",
+                setVideoChannelStatus("The Elevated account is off. The video link goes out on the Standard account again.",
                     androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
             } else if (hasSavedVideoCerts(prefs)) {
                 reconnectVideoFromSaved(prefs)
@@ -677,7 +761,7 @@ class TakServerActivity : AppCompatActivity() {
             val u = videoUsername.text.toString().trim()
             val p = videoPassword.text.toString()
             if (h.isEmpty() || u.isEmpty() || p.isEmpty()) {
-                setVideoChannelStatus("Host (above), video username and password are required.",
+                setVideoChannelStatus("The Elevated account needs the host (above), its username and its password.",
                     androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
                 return@setOnClickListener
             }
@@ -697,8 +781,8 @@ class TakServerActivity : AppCompatActivity() {
      * SERVER decides delivery; `<dest group>` is the invention that destroyed markers when it
      * was tried and must never come back. So the application cannot
      * filter arriving traffic by channel. Unticking a channel is what stops it arriving, and it
-     * works because the server stops sending it, not because the client throws it away. Do not
-     * re-propose a client-side channel filter.
+     * works because the server stops sending it, not because the client throws it away. A
+     * client-side channel filter cannot work.
      */
     private fun renderVideoChannels(channels: List<TakMissionClient.Channel>) {
         val list = findViewById<android.widget.LinearLayout>(R.id.takVideoChannelsList) ?: return
@@ -712,7 +796,7 @@ class TakServerActivity : AppCompatActivity() {
         checkChannelOverlap()
         updatingVideoChannels = true
         for (ch in channels) {
-            val row = android.widget.CheckBox(this).apply {
+            val row = android.widget.CheckBox(activity).apply {
                 text = TakMissionManager.channelLabel(ch)
                 // ⚠ LOCKED IS NOT DISABLED — the same rule as the Standard rows above. Dimming
                 // the tick hides which channels are on, and that is the one thing a pilot opens
@@ -753,13 +837,13 @@ class TakServerActivity : AppCompatActivity() {
      */
     private fun pushElevatedActiveChannels() {
         val bits = latestVideoChannels.filter { it.active && it.bitpos >= 0 }.map { it.bitpos }
-        setVideoChannelStatus("Sending ${bits.size} active channel(s) for the Elevated account…",
+        setVideoChannelStatus("Sending the active channels of the Elevated account (${bits.size})…",
             androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_secondary))
-        TakMissionManager.setElevatedActiveChannels(this, bits) { ok ->
+        TakMissionManager.setElevatedActiveChannels(activity, bits) { ok ->
             if (ok) {
                 AppLog.i(TAG, "Elevated active channels -> ${bits.size} channel(s)")
                 setVideoChannelStatus(
-                    "The server has ${bits.size} active channel(s) for the Elevated account. " +
+                    "The server accepted the active channels of the Elevated account (${bits.size}). " +
                         "This applies to every controller on that account.",
                     androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go))
             } else {
@@ -824,7 +908,7 @@ class TakServerActivity : AppCompatActivity() {
             channelsStatusIsEmptyNotice = false
         }
         for (ch in channels) {
-            val row = android.widget.CheckBox(this).apply {
+            val row = android.widget.CheckBox(activity).apply {
                 // Two-way is the normal case and gets no label — a note on every row is
                 // noise, and the exception is what a pilot needs to see.
                 text = when {
@@ -890,8 +974,8 @@ class TakServerActivity : AppCompatActivity() {
         }
         overlapWarningShown = true
         AppLog.w(TAG, "Standard and Elevated accounts share active channel(s): $shared")
-        setVideoChannelStatus("Standard and Elevated share channel ${shared.joinToString()} — " +
-            "everyone in it will get video. Fix this on the server.",
+        setVideoChannelStatus("The Standard and Elevated accounts are both in channel ${shared.joinToString()}. " +
+            "Everyone in that channel gets the video. Correct this on the server.",
             androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
     }
 
@@ -907,9 +991,9 @@ class TakServerActivity : AppCompatActivity() {
      * enrolled as this user gets this set.
      */
     private fun pushActiveChannels() {
-        // ⚠ NEVER WRITE TO A SERVER THAT HAS NO CHANNELS. The TAK Aware developer reported
-        // that a channel change sent to a server which does not have channels
-        // enabled can do real damage server side — days of debugging on one deployment. No row
+        // ⚠ NEVER WRITE TO A SERVER THAT HAS NO CHANNELS. A channel change sent to a server
+        // which does not have channels enabled is reported to cause real trouble server
+        // side. No row
         // exists when the list is empty, thus no toggle can fire this, but the guard is here
         // so that stays true if a caller is ever added.
         if (latestChannels.isEmpty()) {
@@ -919,10 +1003,10 @@ class TakServerActivity : AppCompatActivity() {
         val bits = latestChannels.filter { it.active && it.bitpos >= 0 }.map { it.bitpos }
         val status = findViewById<TextView>(R.id.takChannelsStatus)
         channelsStatusIsEmptyNotice = false
-        status.text = "Sending ${bits.size} active channel(s) to the server…"
+        status.text = "Sending the active channels to the server (${bits.size})…"
         TakMissionManager.setActiveChannels(bits) { ok ->
-            status.text = if (ok) "Server accepted ${bits.size} active channel(s)."
-                          else "The server refused the change. See the log."
+            status.text = if (ok) "The server accepted the active channels (${bits.size})."
+                          else "The server refused the change. See the Debug Log."
             status.setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext,
                 if (ok) R.color.tp_state_go else R.color.tp_state_danger))
             // Read it back. The server is the truth, not what was just tapped.
@@ -948,6 +1032,7 @@ class TakServerActivity : AppCompatActivity() {
         channelsStatusIsEmptyNotice = false
         findViewById<TextView>(R.id.takChannelsStatus)?.text =
             "The server changed the channels. The list is up to date."
+        onChanged()
     }
 
     /**
@@ -970,10 +1055,12 @@ class TakServerActivity : AppCompatActivity() {
                         else "Connected. Sending the aircraft position to TAK.",
                         androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_go))
                     refreshChannels()
+                    onChanged()
                 } else if (cs != null) {
                     AppLog.w(TAG, "TAK not connected — retrying")
-                    setStatus("Not connected. Check the server and the certificates. Retrying …",
+                    setStatus("Not connected. The app tries again. Check the server settings and the enrollment.",
                         androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_state_danger))
+                    onChanged()
                 }
             }
         }
@@ -993,8 +1080,34 @@ class TakServerActivity : AppCompatActivity() {
      *  be wiped by a later repaint, thus renderChannels clears only its own message. */
     private var channelsStatusIsEmptyNotice = false
 
+    /**
+     * THE BROADCAST ID FOLLOWS THE CALLSIGN: each video server whose id
+     * is empty or still the old callsign takes the new one. An id set on purpose stays. Not
+     * while the video section is locked: the lock stops every change to it.
+     */
+    private fun followCallsignInVideo(
+        prefs: android.content.SharedPreferences, oldCallsign: String?, newCallsign: String,
+    ) {
+        if (prefs.getBoolean(TakConnectActivity.KEY_VIDEO_LOCKED, false)) return
+        val edit = prefs.edit()
+        var changed = false
+        for (slot in 1..2) {
+            val key = VideoServersPanel.vKey(slot, "streamid")
+            val now = prefs.getString(key, "") ?: ""
+            val next = SafeName.followCallsign(now, oldCallsign, newCallsign) ?: continue
+            if (next == now) continue
+            edit.putString(key, next)
+            changed = true
+            AppLog.i(TAG, "video server $slot broadcast id follows the callsign")
+        }
+        if (!changed) return
+        edit.apply()
+        VideoServersPanel.mirrorActiveSlot(prefs)
+        onVideoIdsChanged()
+    }
+
     companion object {
-        private const val TAG = "TakServerActivity"
+        private const val TAG = "TakServerPanel"
 
         /** ⚠ The same preference FILE Pre-Flight uses — nothing migrated when this screen took
          *  the fields, so every key below is the key that was already written. */

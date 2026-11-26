@@ -78,7 +78,7 @@ enum class AppMode(
          * May a second TAK account (the Elevated / video-channel connection) exist at all?
          *
          * ⚠ **THE GATE IS [ElevatedChannel.dialNow], AND EVERY DIAL GOES THROUGH IT.** Boot,
-         * both screen resumes, the in-flight TAK badge and [TakServerActivity]'s connect paths
+         * both screen resumes, the in-flight TAK badge and [TakServerPanel]'s connect paths
          * all call `ElevatedChannel.dial`, which reads this at the moment of the dial and again
          * after it. So a pilot who taps the badge to clear a link wobble mid-flight cannot bring
          * the split back with the stream up — which would silently take the feed from the
@@ -87,7 +87,7 @@ enum class AppMode(
          */
         fun elevatedAccountAllowed(prefs: SharedPreferences): Boolean = of(prefs) == ENHANCED
 
-        /** May the Video Servers screen offer a second server card, or Pre-Flight a choice? */
+        /** May Pre-Flight show the second video server card, and a choice between two? */
         fun secondVideoServerAllowed(prefs: SharedPreferences): Boolean = of(prefs) == ENHANCED
 
         /**
@@ -202,10 +202,10 @@ enum class AppMode(
          *    behind a password the pilot may not have).
          */
         fun secondVideoServerInUse(prefs: SharedPreferences): Boolean =
-            prefs.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 1) == 2 ||
-                prefs.getString(VideoServersActivity.vKey(1, "advertise"),
-                    VideoServersActivity.ADV_SELF) == VideoServersActivity.ADV_OTHER ||
-                !(prefs.getString(VideoServersActivity.vKey(2, "host"), "") ?: "").isBlank()
+            prefs.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 1) == 2 ||
+                prefs.getString(VideoServersPanel.vKey(1, "advertise"),
+                    VideoServersPanel.ADV_SELF) == VideoServersPanel.ADV_OTHER ||
+                !(prefs.getString(VideoServersPanel.vKey(2, "host"), "") ?: "").isBlank()
 
         /**
          * The whole boot step, as a function of the preferences — so its ORDER, which is
@@ -238,7 +238,7 @@ enum class AppMode(
                 elevatedLoggedOut = prefs.getBoolean("chb_logged_out", false),
             )
             if (of(prefs) == BASIC) AppModeTransition.enforceBasicInvariants(prefs)
-            else VideoServersActivity.mirrorActiveSlot(prefs)
+            else VideoServersPanel.mirrorActiveSlot(prefs)
         }
 
         internal fun prefs(context: Context): SharedPreferences =

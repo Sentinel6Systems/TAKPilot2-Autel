@@ -1,7 +1,6 @@
 package com.autel.sdksample.tak
 
 import android.content.Context
-import android.os.Bundle
 import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
@@ -14,52 +13,61 @@ import com.autel.sdksample.R
 import com.taklite.util.AppLog
 
 /**
- * The set-once video server configuration, kept off Pre-Flight.
+ * The two video server cards in the Video group of Pre-Flight.
  *
- * Pre-Flight keeps the two things that change — the video quality, every flight, and which
- * server is active, per callout. Everything else is entered one time and locked, and twenty
- * such controls in one column made the sub-sections easy to mix up with each other.
+ * ⚠ THIS WAS A SCREEN OF ITS OWN (`VideoServersActivity`), behind a
+ * "Configure Video Servers" button, because twenty set-once controls in the one long Pre-Flight
+ * column were easy to mix up. Pre-Flight now has a left rail and shows one group at a time, so
+ * the cards are on the Video page again. This
+ * class is not an Activity: [TakConnectActivity] owns the views and calls [bind] one time.
  *
  * ## Both servers at once, and each field writes its own
  *
- * On Pre-Flight every field below the server toggle belonged to whichever server that toggle
- * selected, and nothing on screen said which one once the pilot had scrolled into the fields.
- * That is the same fault as a control whose meaning changes with a toggle above it — one
- * fixed twice already elsewhere in this app. Here the two servers are side by side and [bindCard] binds
- * each card to a fixed slot, so there is no active-slot state to get wrong.
+ * The two servers are side by side and [bindCard] binds each card to a fixed slot. There is no
+ * "which server do these fields belong to" state to get wrong. That fault — a control whose
+ * meaning changes with a toggle above it — was fixed twice already elsewhere in this app.
  *
- * ## What this screen does NOT own
+ * ## What this panel does NOT own
  *
- *  - **The lock.** It lives on Pre-Flight, where it also guards the active-server toggle, and
- *    unlocking asks for confirmation. This screen reads it and stops taking touches.
- *  - **Which server is active.** Shown as a badge, changed on Pre-Flight.
+ *  - **The lock.** The "Lock configuration" box is in the title row of the Video group, and
+ *    it also guards the active-server toggle. The host tells the panel with [applyLock]. The
+ *    cards lock and unlock IN PLACE, so every listener is attached one time and reads the lock
+ *    when it runs.
+ *  - **Which server is active.** Shown as a badge, changed with the toggle above the cards.
+ *    The host calls [reload] after a change.
  *  - **The preference layout.** Nothing moved; these are the same per-slot keys the previous
  *    screen wrote, so there is no migration.
  *
  * ⚠ **The active slot must be mirrored onto the plain keys after any edit.** [AutelVideoStreamer]
  * reads those, not the slots — see [mirrorActiveSlot], the one mirror.
+ *
+ * @param onChanged called after a card saves. The host paints its generated summaries again.
  */
-class VideoServersActivity : AppCompatActivity() {
+class VideoServersPanel(
+    private val activity: AppCompatActivity,
+    private val onChanged: () -> Unit = {},
+) {
 
-    private lateinit var prefs: android.content.SharedPreferences
+    private val prefs: android.content.SharedPreferences =
+        activity.getSharedPreferences("takpilot2_tak", Context.MODE_PRIVATE)
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_video_servers)
+    private val resources get() = activity.resources
+    private val packageName: String get() = activity.packageName
+    private fun <T : View?> findViewById(id: Int): T = activity.findViewById<T>(id)
 
-        AppLog.v(TAG, "video servers opened")
-        supportActionBar?.apply {
-            setDisplayHomeAsUpEnabled(true)
-            setHomeAsUpIndicator(R.drawable.ic_menu)
-        }
-        prefs = getSharedPreferences("takpilot2_tak", Context.MODE_PRIVATE)
+    private fun locked(): Boolean = prefs.getBoolean(KEY_VIDEO_LOCKED, false)
 
-        val locked = prefs.getBoolean(KEY_VIDEO_LOCKED, false)
-        findViewById<TextView>(R.id.vsLockNotice).visibility =
-            if (locked) View.VISIBLE else View.GONE
+    /** One function for each card: fills the card from the preferences again. See [reload]. */
+    private val fills = mutableListOf<() -> Unit>()
+    /** One function for each card: sets the card's controls for a lock state. */
+    private val locks = mutableListOf<(Boolean) -> Unit>()
 
-        bindCard(1, locked)
-        bindCard(2, locked)
+    /** Wires the two cards. Call ONE time: a second call would attach every listener twice. */
+    fun bind() {
+        AppLog.v(TAG, "video server cards bound")
+        bindCard(1)
+        bindCard(2)
+        applyLock(locked())
 
         // ⚠ BASIC HAS ONE VIDEO SERVER, AND THERE ARE TWO DOORS TO THE SECOND ONE.
         //  1. Card 2 itself.
@@ -86,7 +94,19 @@ class VideoServersActivity : AppCompatActivity() {
         }
     }
 
-    override fun onSupportNavigateUp(): Boolean { finish(); return true }
+    /**
+     * Fills both cards from the preferences again, and their ACTIVE badges.
+     *
+     * ⚠ NEEDED BECAUSE THE CARDS ARE NOW ON THE SAME PAGE AS WHAT CHANGES THEM. The callsign
+     * field in the TAK group can change a Broadcast ID, and the toggle above the cards changes
+     * the active server. A card that kept its old text would write it back at its next edit.
+     */
+    fun reload() = fills.forEach { it() }
+
+    /** Locks or unlocks both cards in place. Called by the host's video lock. */
+    fun applyLock(locked: Boolean) {
+        locks.forEach { it(locked) }
+    }
 
     /**
      * Wires one card to one server slot.
@@ -94,7 +114,7 @@ class VideoServersActivity : AppCompatActivity() {
      * The slot is a parameter and never changes for the life of the card, which is the whole
      * reason this screen exists. Every read and every write below names it.
      */
-    private fun bindCard(slot: Int, locked: Boolean) {
+    private fun bindCard(slot: Int) {
         fun id(name: String): Int =
             resources.getIdentifier("vs$slot$name", "id", packageName)
         fun <T : View> v(name: String): T = findViewById(id(name))
@@ -215,21 +235,21 @@ class VideoServersActivity : AppCompatActivity() {
             rtspBlock.visibility = if (srt) View.GONE else View.VISIBLE
 
             codecHint.text = if (selectedCodec() == VideoCodec.H265)
-                "More efficient. Better picture for the bandwidth, but fewer clients play it."
+                "A better picture for the same data rate, but fewer TAK apps can play it."
             else
-                "Most compatible. Plays on the widest range of clients."
+                "Most TAK apps can play it."
 
             transportHint.text = if (srt)
-                "Low delay on a less reliable network, for example a cellular network."
+                "Low delay on a network that is not reliable, for example a cellular network."
             else
                 "The lowest delay on a reliable network."
 
             val advSrt = selectedAdvProto() == VideoTransport.SRT
             advSrtBlock.visibility = if (advSrt) View.VISIBLE else View.GONE
             advProtoHint.text = if (advSrt)
-                "ATAK only. TAK Aware cannot play SRT yet — leave this on RTSP for a mixed team."
+                "Only ATAK can play SRT. TAK Aware cannot. Use RTSP if your team has both."
             else
-                "Plays on every TAK client. Use this unless the whole team is on ATAK."
+                "All TAK apps can play RTSP. Use it unless the full team uses ATAK."
 
             advOther.text = slotName(if (slot == 1) 2 else 1)
             val cfg = buildConfig()
@@ -238,19 +258,19 @@ class VideoServersActivity : AppCompatActivity() {
             // below already shows in full — and a card that says the same thing twice in two
             // shapes is what made this screen blur together when read quickly.
             advUrl.text =
-                if (!cfg.advertiseEnabled) "(no address in the CoT)"
+                if (!cfg.advertiseEnabled) "(no video address is sent to TAK)"
                 else if (cfg.advertiseHost.ifEmpty { cfg.host }.isEmpty() ||
                     cfg.streamId.isEmpty())
-                    "${selectedAdvProto().scheme}://…  (enter host + identifier)"
+                    "${selectedAdvProto().scheme}://…  (type the host and the Broadcast ID)"
                 else cfg.advertiseUrlSafe()
             pushUrl.text =
                 if (cfg.host.isEmpty() || cfg.streamId.isEmpty())
-                    "${cfg.transport.scheme}://…  (enter host + identifier)"
+                    "${cfg.transport.scheme}://…  (type the host and the Broadcast ID)"
                 else cfg.urlSafe()
             // The name the server will see, from the same function that builds every address.
             // With the token on, this is the one place a pilot can read the token before LIVE.
             streamPath.text =
-                if (cfg.streamId.isEmpty()) "…  (enter a broadcast id)" else cfg.streamPath()
+                if (cfg.streamId.isEmpty()) "…  (type a Broadcast ID)" else cfg.streamPath()
             title.text = slotName(slot)
         }
 
@@ -260,6 +280,16 @@ class VideoServersActivity : AppCompatActivity() {
          * cost a stored video password once already.
          */
         fun save() {
+            // The listeners are attached for the life of the page, so each save reads the
+            // lock and the mode when it runs. A locked card does not take touches, and a
+            // restored view state must not write through a lock or into a server that Basic
+            // hides (the same trap as TakConnectActivity.rebuildWithoutSavedState).
+            if (locked()) return
+            if (!AppMode.secondVideoServerAllowed(prefs) &&
+                (slot == 2 || selectedAdvertise() == ADV_OTHER)) {
+                AppLog.i(TAG, "Basic mode: a write for the second video server is refused")
+                return
+            }
             val cfg = buildConfig()
             prefs.edit()
                 .putString(vKey(slot, "name"), name.text.toString().trim())
@@ -289,67 +319,90 @@ class VideoServersActivity : AppCompatActivity() {
             // The other card names this one on its "TAK Advertisement Server" button and may
             // advertise through it, so a change here can change what it shows.
             refreshOtherCard(slot)
+            onChanged()
         }
 
         // ---- Fill from the slot ----
-        name.setText(prefs.getString(vKey(slot, "name"), "") ?: "")
-        host.setText(prefs.getString(vKey(slot, "host"), "") ?: "")
-        streamId.setText(prefs.getString(vKey(slot, "streamid"), "") ?: "")
-        randomPath.isChecked = prefs.getBoolean(vKey(slot, "random_path"), false)
-        user.setText(prefs.getString(vKey(slot, "user"), "") ?: "")
-        pass.setText(prefs.getString(vKey(slot, "pass"), "") ?: "")
-        rtspPort.setText(prefs.getInt(vKey(slot, "rtsp_port"),
-            VideoTransport.RTSP.defaultPort).toString())
-        srtPort.setText(prefs.getInt(vKey(slot, "srt_port"),
-            VideoTransport.SRT.defaultPort).toString())
-        passphrase.setText(prefs.getString(vKey(slot, "srt_phrase"), "") ?: "")
-        codecGroup.check(
-            if (VideoCodec.fromPref(prefs.getString(vKey(slot, "codec"), null)) == VideoCodec.H265)
-                id("CodecH265") else id("CodecH264"))
-        transportGroup.check(
-            if (VideoTransport.fromPref(prefs.getString(vKey(slot, "transport"), null)) ==
-                VideoTransport.SRT) id("TransportSrt") else id("TransportRtsp"))
-        advSrtPort.setText(prefs.getInt(vKey(slot, "adv_srt_port"),
-            VideoTransport.SRT.defaultPort).toString())
-        advPassphrase.setText(prefs.getString(vKey(slot, "adv_srt_phrase"), "") ?: "")
-        advProtoGroup.check(
-            if (VideoTransport.fromPref(prefs.getString(vKey(slot, "adv_transport"), null)) ==
-                VideoTransport.SRT) id("AdvProtoSrt") else id("AdvProtoRtsp"))
-        advGroup.check(when (prefs.getString(vKey(slot, "advertise"), ADV_SELF)) {
-            ADV_OTHER -> id("AdvOther")
-            ADV_OFF -> id("AdvOff")
-            else -> id("AdvSelf")
-        })
-        activeBadge.visibility =
-            if (prefs.getInt(KEY_V_ACTIVE_SLOT, 1) == slot) View.VISIBLE else View.GONE
-        loading = false
-        refreshDerived()
+        fun fill() {
+            loading = true
+            name.setText(prefs.getString(vKey(slot, "name"), "") ?: "")
+            host.setText(prefs.getString(vKey(slot, "host"), "") ?: "")
+            streamId.setText(prefs.getString(vKey(slot, "streamid"), "") ?: "")
+            // EMPTY MEANS THE AIRCRAFT CALLSIGN: an empty Broadcast ID is
+            // filled with the callsign and saved, while the section is unlocked. The callsign
+            // screen keeps them together afterwards (SafeName.followCallsign).
+            if (!locked() && streamId.text.isNullOrEmpty()) {
+                val cs = prefs.getString("callsign", "") ?: ""
+                if (cs.isNotEmpty() && SafeName.isValid(cs)) {
+                    streamId.setText(cs)
+                    prefs.edit().putString(vKey(slot, "streamid"), cs).apply()
+                    mirrorActiveSlot(prefs)
+                }
+            }
+            randomPath.isChecked = prefs.getBoolean(vKey(slot, "random_path"), false)
+            user.setText(prefs.getString(vKey(slot, "user"), "") ?: "")
+            pass.setText(prefs.getString(vKey(slot, "pass"), "") ?: "")
+            rtspPort.setText(prefs.getInt(vKey(slot, "rtsp_port"),
+                VideoTransport.RTSP.defaultPort).toString())
+            srtPort.setText(prefs.getInt(vKey(slot, "srt_port"),
+                VideoTransport.SRT.defaultPort).toString())
+            passphrase.setText(prefs.getString(vKey(slot, "srt_phrase"), "") ?: "")
+            codecGroup.check(
+                if (VideoCodec.fromPref(prefs.getString(vKey(slot, "codec"), null)) == VideoCodec.H265)
+                    id("CodecH265") else id("CodecH264"))
+            transportGroup.check(
+                if (VideoTransport.fromPref(prefs.getString(vKey(slot, "transport"), null)) ==
+                    VideoTransport.SRT) id("TransportSrt") else id("TransportRtsp"))
+            advSrtPort.setText(prefs.getInt(vKey(slot, "adv_srt_port"),
+                VideoTransport.SRT.defaultPort).toString())
+            advPassphrase.setText(prefs.getString(vKey(slot, "adv_srt_phrase"), "") ?: "")
+            advProtoGroup.check(
+                if (VideoTransport.fromPref(prefs.getString(vKey(slot, "adv_transport"), null)) ==
+                    VideoTransport.SRT) id("AdvProtoSrt") else id("AdvProtoRtsp"))
+            advGroup.check(when (prefs.getString(vKey(slot, "advertise"), ADV_SELF)) {
+                ADV_OTHER -> id("AdvOther")
+                ADV_OFF -> id("AdvOff")
+                else -> id("AdvSelf")
+            })
+            activeBadge.visibility =
+                if (prefs.getInt(KEY_V_ACTIVE_SLOT, 1) == slot) View.VISIBLE else View.GONE
+            loading = false
+            refreshDerived()
+        }
+        // LETTERS, DIGITS, '-' AND '_' ONLY (see SafeName). Attached one time, not in fill().
+        SafeNameField.attach(streamId)
+        // An eye in each password and passphrase field (see PasswordEye).
+        // A locked field is disabled, so it cannot be shown; the lock below also masks it again.
+        val secrets = listOf(pass, passphrase, advPassphrase)
+        secrets.forEach { PasswordEye.attach(it) }
+        fill()
+        fills += { fill() }
 
         // Copy the path on a touch. The path is what the pilot checks against the server, and
         // with the token on it is not typeable from memory. Reading it works locked or not.
         streamPath.setOnClickListener {
             val text = streamPath.text?.toString() ?: return@setOnClickListener
             if (text.startsWith("…")) return@setOnClickListener
-            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             cm.setPrimaryClip(android.content.ClipData.newPlainText("stream path", text))
-            android.widget.Toast.makeText(this, "Stream path copied", android.widget.Toast.LENGTH_SHORT)
+            android.widget.Toast.makeText(activity, "Stream path copied", android.widget.Toast.LENGTH_SHORT)
                 .show()
         }
 
-        if (locked) {
-            // The lock stops a CHANGE, not the reading: the fields keep full contrast and stop
-            // taking touches, exactly as they did on Pre-Flight.
+        // The lock stops a CHANGE, not the reading: the fields keep full contrast and stop
+        // taking touches. Both directions, because the lock box is on this page now.
+        locks += { locked ->
+            if (locked) secrets.forEach { PasswordEye.mask(it) }
             for (view in listOf<View>(name, host, streamId, user, pass, rtspPort, srtPort,
                 passphrase, advSrtPort, advPassphrase)) {
-                view.isEnabled = false
+                view.isEnabled = !locked
             }
-            randomPath.apply { isClickable = false; isFocusable = false }
+            randomPath.apply { isClickable = !locked; isFocusable = !locked }
             for (group in listOf(codecGroup, transportGroup, advGroup, advProtoGroup)) {
                 for (i in 0 until group.childCount) {
-                    group.getChildAt(i).apply { isClickable = false; isFocusable = false }
+                    group.getChildAt(i).apply { isClickable = !locked; isFocusable = !locked }
                 }
             }
-            return
         }
 
         val watcher = object : android.text.TextWatcher {
@@ -383,7 +436,7 @@ class VideoServersActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val TAG = "VideoServersActivity"
+        private const val TAG = "VideoServersPanel"
 
         /** Preference key for one field of one video server slot. Must match the helper of the
          *  same name in [TakConnectActivity] — the two screens share this store. */

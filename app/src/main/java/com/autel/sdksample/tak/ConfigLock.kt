@@ -8,7 +8,7 @@ import com.taklite.util.AppLog
  * The configuration lock — one implementation, used by every screen that has one.
  *
  * It was a private pair of methods on [TakConnectActivity] until the TAK server
- * configuration moved to [TakServerActivity] and a second screen needed the same lock.
+ * configuration moved to [TakServerPanel] and a second screen needed the same lock.
  * Copying it would have been the obvious thing and the wrong one: the two rules below are
  * SAFETY rules that were each arrived at from a real fault, and a copy is how one screen keeps
  * them while the other quietly stops.
@@ -69,7 +69,7 @@ object ConfigLock {
             // receives this aircraft, which is the mode itself: see
             // AppMode.unlockNeedsConfirmation, and note that gating the mode in BOTH directions
             // is what stops this becoming a free route to an unlocked Elevated-mode controller.
-            // Order: the pref FIRST — TakServerActivity's rows read it at paint time through
+            // Order: the pref FIRST — TakServerPanel's rows read it at paint time through
             // afterChange, and apply() updates the in-memory value at once.
             // ⚠ confirmBody is NOT shown on this path. For the battery lock it carries safety
             // text; that follows from the "tick alone" decision, recorded so it is not mistaken

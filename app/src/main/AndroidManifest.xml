@@ -159,17 +159,6 @@
         <service android:name=".tak.TakForegroundService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
-        <!-- TAK SERVER — the connection configuration, kept off Pre-Flight by design.
-             Same shape as the video-servers screen: a set-once configuration that
-             buried the things a pilot actually reads before a flight. -->
-        <activity android:name=".tak.TakServerActivity"
-            android:label="TAK Server"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|keyboardHidden|screenSize" />
-        <activity android:name=".tak.VideoServersActivity"
-            android:label="Video Servers"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|keyboardHidden|screenSize" />
         <activity android:name=".tak.DebugActivity"
             android:label="Debug Log"
             android:screenOrientation="landscape"

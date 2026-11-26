@@ -831,7 +831,7 @@ object VideoStreamerHolder {
         val cfg = AutelVideoStreamer.VideoConfig(
             host = host,
             streamId = streamId,
-            // ⚠ Keys must match what VideoServersActivity.mirrorActiveSlot WRITES — the one
+            // ⚠ Keys must match what VideoServersPanel.mirrorActiveSlot WRITES — the one
             // mirror. They are literals here; if one moves, move both.
             //
             // The RTSP set is read whichever transport is selected — it is what the CoT

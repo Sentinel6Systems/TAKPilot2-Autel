@@ -134,15 +134,16 @@ object DtedStore {
     /** Imports the picked document as a new region named after [displayName] (extension
      *  stripped): a .zip has every .dt0-.dt5 entry extracted into the shared pool
      *  (overwriting any same-named tile in place — the newest import always wins, no
-     *  confirmation needed, by design); anything else is imported as a lone-tile region.
+     *  confirmation needed, by design). Anything that is not a .zip is
+     *  refused: see [isRegionArchive].
      *  Crash-safe: the import row is inserted `pending` before any file I/O and only flipped
      *  to `complete` after every tile is on disk — see [TerrainDatabase]. */
     /**
      * [import] on a worker thread, with both callbacks delivered on the MAIN thread.
      *
      * ⚠ **THE IMPORT USED TO RUN SYNCHRONOUSLY IN `onActivityResult`, AND A REAL REGION
-     * PROVED IT WRONG.** An import of 39 IFSAR tiles — a 1.1 GB zip, 3.16 GB extracted — turned
-     * the flight application's window BLACK for minutes while the main thread decompressed and
+     * PROVED IT WRONG.** An import of a large multi-tile region — over a GB zipped, several GB
+     * extracted — turned the flight application's window BLACK for minutes while the main thread decompressed and
      * wrote every one. The controller itself stayed responsive, which is how it differs from a
      * compositor freeze: only this application's UI thread was blocked.
      *
@@ -185,6 +186,12 @@ object DtedStore {
         displayName: String,
         onProgress: (Int) -> Unit = {},
     ): ImportResult {
+        // The name decides first. A file picker can give a zip with no name, or a name with
+        // no ".zip", so the first bytes are read then: a zip starts "PK", a tile "UHL1".
+        if (!isRegionArchive(displayName) && !isZip(context, uri)) {
+            AppLog.w(TAG, "refusing import \"$displayName\" — not a .zip")
+            return ImportResult(0, ZIP_ONLY_MESSAGE)
+        }
         val regionName = sanitizeRegionName(displayName.substringBeforeLast('.'))
         val dao = TerrainDatabase.get(context).terrainDao()
         val importId = dao.insertImport(
@@ -197,13 +204,7 @@ object DtedStore {
             )
         )
         val pool = dir(context)
-        // A zip by its CONTENT, not its name: a SAF display name is whatever the
-        // provider says.
-        val result = if (isZip(context, uri)) {
-            importZip(context, uri, pool, onProgress)
-        } else {
-            importSingleFile(context, uri, displayName, pool)
-        }
+        val result = importZip(context, uri, pool, onProgress)
         if (result.tileNames.isEmpty()) {
             dao.deleteImportRow(importId) // don't leave an empty/failed region behind
             return ImportResult(0, result.error ?: "No DTED tiles found (.dt0 to .dt5)")
@@ -222,13 +223,52 @@ object DtedStore {
 
     private data class ExtractResult(val tileNames: List<String>, val error: String? = null)
 
+    /** A zip by its CONTENT: a SAF display name is whatever the provider says. */
     private fun isZip(context: Context, uri: Uri): Boolean = runCatching {
         context.contentResolver.openInputStream(uri)?.use { s ->
             val b = ByteArray(4)
-            s.read(b) == 4 && b[0] == 'P'.code.toByte() && b[1] == 'K'.code.toByte() &&
-                b[2] == 3.toByte() && b[3] == 4.toByte()
+            var got = 0
+            while (got < 4) {
+                val r = s.read(b, got, 4 - got)
+                if (r < 0) break
+                got += r
+            }
+            isZipHeader(b.copyOf(got))
         } ?: false
     }.getOrDefault(false)
+
+    /** True when [head] is the start of a zip archive (local file header, "PK" 3 4). */
+    internal fun isZipHeader(head: ByteArray): Boolean =
+        head.size >= 4 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() &&
+            head[2] == 3.toByte() && head[3] == 4.toByte()
+
+    /**
+     * A region is imported as ONE .zip and nothing else (design decision).
+     *
+     * ⚠ A LOOSE TILE WAS ACCEPTED UNTIL THEN, AND IT LOST DATA WITH NO SIGN OF IT. A region
+     * names each tile by latitude only ("n45.dt2") and keeps the longitude in the folder
+     * ("w101/"). The zip path stores "w101_n45.dt2"; a tile picked by itself has no folder, so
+     * every longitude's "n45.dt2" was stored under the same name and replaced the one before.
+     * A region imported tile by tile showed many regions in Pre-Flight and held only a few
+     * tiles. Nothing a pilot does by hand can put the longitude back, so the loose
+     * tile is refused and the message says what to pick instead.
+     */
+    internal fun isRegionArchive(displayName: String): Boolean =
+        displayName.trim().lowercase().endsWith(".zip")
+
+    /**
+     * True for a zip entry that is not a tile although its name ends like one. A zip made on a
+     * Mac holds a small "._n45.dt2" beside every "n45.dt2", in a "__MACOSX" folder: the Finder's
+     * own notes about the file. Kept, they were refused one by one by [writeTile] and the
+     * import reported them as bad tiles.
+     */
+    internal fun isJunkEntry(entryName: String): Boolean {
+        val parts = entryName.replace('\\', '/').split('/')
+        return parts.any { it == "__MACOSX" } || parts.last().startsWith("._")
+    }
+
+    /** Shown after "The app cannot import <name>." on the Pre-Flight status line. */
+    internal const val ZIP_ONLY_MESSAGE = "Pick the region's .zip file, not a single tile."
 
     /**
      * The pool name for an incoming name: separators flattened, leading dots stripped, only a
@@ -286,20 +326,6 @@ object DtedStore {
         }
     }
 
-    private fun importSingleFile(context: Context, uri: Uri, displayName: String, pool: File): ExtractResult {
-        val name = poolName(displayName)
-            ?: return ExtractResult(emptyList(), "Not a DTED tile or zip: $displayName")
-        return try {
-            val err = context.contentResolver.openInputStream(uri)?.use { input ->
-                writeTile(input, pool, name)
-            } ?: "Failed to read $displayName"
-            if (err != null) ExtractResult(emptyList(), err) else ExtractResult(listOf(name))
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "DTED file import failed: ${t.message}")
-            ExtractResult(emptyList(), t.message)
-        }
-    }
-
     /** Extracts every .dt0-.dt5 entry from the zip into the shared pool, flattening each
      *  entry's path ("w101/n45.dt2" -> "w101_n45.dt2") so same-named tiles from different
      *  longitude folders don't collide with each other WITHIN this zip. Across zips, an
@@ -321,7 +347,7 @@ object DtedStore {
                     while (entry != null) {
                         if (++entries > MAX_ZIP_ENTRIES)
                             throw java.io.IOException("more than $MAX_ZIP_ENTRIES entries — not a terrain archive")
-                        if (!entry.isDirectory) {
+                        if (!entry.isDirectory && !isJunkEntry(entry.name)) {
                             val flatName = poolName(entry.name)
                             if (flatName != null) {
                                 // A declared size that cannot fit is refused before it is written.
@@ -330,7 +356,12 @@ object DtedStore {
                                     throw java.io.IOException("not enough free storage for ${entry.name}")
                                 val err = writeTile(zip, pool, flatName)
                                 if (err == null) {
-                                    tileNames.add(flatName)
+                                    // Two entries can flatten to one name ("w101/n45.dt2" and
+                                    // "w101_n45.dt2"). The later one replaced the file, as between
+                                    // zips; the name is listed once, or the region's rows refuse
+                                    // the second and the whole import fails.
+                                    if (flatName !in tileNames) tileNames.add(flatName)
+                                    else AppLog.w(TAG, "zip entry stored over an earlier one: ${entry.name}")
                                     onProgress(tileNames.size)
                                 } else {
                                     AppLog.w(TAG, "zip entry refused: $err")

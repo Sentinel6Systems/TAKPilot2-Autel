@@ -305,9 +305,9 @@ public class TakManager implements TakClient.TakClientListener {
      * {@link #connect}/{@link #disconnect}: this never touches cert A's socket, and a caller may
      * connect/disconnect this one repeatedly while A stays up throughout.
      *
-     * Uses the SAME {@code uid} as cert A (both represent this one aircraft/controller) so a
-     * server-side admin can tell at a glance that A and B are the same airframe under two
-     * certificates. What this connection does with INBOUND traffic is the caller's choice: the
+     * Carries everything but the pilot report (see {@link #elevatedCarries}): the
+     * pilot's uid must reach the server from cert A alone, or a marker shared to the pilot is
+     * routed to this connection and lost. What this connection does with INBOUND traffic is the caller's choice: the
      * six-argument form throws it away, which is B's original behaviour and still the
      * default; the seven-argument form below takes a flag.
      */
@@ -507,7 +507,7 @@ public class TakManager implements TakClient.TakClientListener {
      *
      * This class used to hold the channels a pilot picked on TAK Setup and inject
      * {@code <marti><dest group="…" send="true"/></marti>} into every CoT that went through what
-     * was then called {@code sendCot} (now {@link #sendOn}/{@link #sendCotToBoth}).
+     * was then called {@code sendCot} (now {@link #sendOn}/{@link #sendCot}).
      * IT SILENTLY DESTROYED MARKERS. With channels selected, the server would
      * not route them and simply dropped them; with none selected they arrived at once. Proved on
      * a controller by watching one marker with the block and one without.
@@ -521,7 +521,7 @@ public class TakManager implements TakClient.TakClientListener {
      * who picked channels to LIMIT who saw this aircraft still broadcast its position to
      * everyone. The feature failed in both directions at once. ⚠ **FIXED with the video
      * split**: both methods now build their CoT
-     * through {@link #sendCotToBoth}/{@link #videoFor} like everything else in this class, so a
+     * through {@link #sendCot}/{@link #videoFor} like everything else in this class, so a
      * video restriction on one connection can no longer be silently ignored by these two.
      *
      * Routing is now left to the certificate's group membership, which is what the server does
@@ -563,11 +563,17 @@ public class TakManager implements TakClient.TakClientListener {
         // the second line says which block it carried and nothing else. If the two ever differ
         // for some OTHER reason, [withoutVideoBlock] stops matching and the full wire is logged
         // — the shortening must never be able to hide a real difference.
-        boolean full = alreadyLogged == null || !sameButForVideoBlock(alreadyLogged, wire);
+        // The Elevated wire also lacks the contact endpoint ([withoutContactEndpoint]); that is
+        // compared away the same way and named on the short line.
+        boolean noEndpoint = alreadyLogged != null && !alreadyLogged.equals(withoutContactEndpoint(alreadyLogged))
+                && wire.equals(withoutContactEndpoint(wire));
+        boolean full = alreadyLogged == null || !sameButForVideoBlock(
+                noEndpoint ? withoutContactEndpoint(alreadyLogged) : alreadyLogged, wire);
         if (full) {
             AppLog.v(TAG, "CoT OUT [" + link + "]: " + redactCredentials(wire));
         } else {
             AppLog.v(TAG, "CoT OUT [" + link + "]: as above, "
+                    + (noEndpoint ? "without the contact endpoint, " : "")
                     + (wire.contains("<__video") ? "plus" : "without") + " the __video block");
         }
         target.sendMessage(wire);
@@ -609,27 +615,73 @@ public class TakManager implements TakClient.TakClientListener {
         return xml.substring(0, start) + xml.substring(end);
     }
 
+    /** What an outbound message is, for {@link #elevatedCarries}. */
+    enum Outbound { PILOT, AIRCRAFT, SENSOR_POINT, FOOTPRINT, MARKER, ALERT }
+
     /**
-     * Sends one CoT on EVERY configured connection: always on cert A, and on cert B too iff a
-     * video channel is configured AND currently connected. {@code xmlForA}/{@code xmlForB} are
-     * built by the caller (typically identical strings, or differing only in whether they carry
-     * {@code __video} — see {@link #videoFor}) so this method stays a pure dispatcher with no
-     * video-policy knowledge of its own.
+     * Which messages go on the Elevated connection (cert B): EVERYTHING BUT THE PILOT REPORT
+     * (design decision). The Elevated account exists only to keep the video link away
+     * from the Standard users; its video-only members must still get the whole aircraft
+     * picture. Everything goes on the Standard connection (cert A).
+     *
+     * ⚠ THE PILOT REPORT ON BOTH CONNECTIONS LOST EVERY MARKER SHARED TO THE PILOT. Both
+     * connections reported the pilot under ONE uid, B always 1 ms after A, and the server ties a
+     * uid to the connection that reported it last. A share to the pilot went to B, whose account
+     * is in the video channel only; the sender was not in that channel, so the server dropped
+     * the share and said nothing (a TAK client then lists the pilot under the
+     * Elevated account's user name, while a client with one connection still gets the
+     * shares). An earlier note on
+     * {@link #connectVideoChannel} had recorded the one-uid choice as an assumption.
+     *
+     * ⚠ AND THE AIRCRAFT REPORT ALONE ON B HID THE REST FROM THE VIDEO-ONLY ACCOUNT. A first
+     * fix kept everything but the aircraft report off B, on the assumption that
+     * the video channel's members are also in the Standard channels. A video-only account is
+     * not: it lost the SPI and the markers the aircraft drops, and kept only the aircraft, its
+     * sensor cone and the line to the SPI it could no longer see. The
+     * SPI, the footprint, the markers and the alerts each carry their OWN uid, thus B may carry
+     * them without taking the pilot's uid away from A. Pure, pinned by VideoSplitPolicyTest.
+     */
+    static boolean elevatedCarries(Outbound kind) {
+        return kind != Outbound.PILOT;
+    }
+
+    /**
+     * Sends one CoT on cert A, and on cert B too iff {@link #elevatedCarries} says so for
+     * {@code kind} AND a video channel is configured AND currently connected.
+     * {@code xmlForA}/{@code xmlForB} are built by the caller (typically identical strings, or
+     * differing only in whether they carry {@code __video} — see {@link #videoFor}) so this
+     * method stays a pure dispatcher with no video-policy knowledge of its own.
      *
      * Every outbound CoT in this class goes through here now — see the class's safety note on
      * why {@code sendDronePLI}/{@code sendCameraPoint} calling {@code client.sendMessage}
      * directly (bypassing the logged/redacted path, and bypassing this fan-out) was the bug that
      * let a pilot who restricted an aircraft's audience still broadcast its position to everyone.
      */
-    private void sendCotToBoth(String xmlForA, String xmlForB) {
+    private void sendCot(Outbound kind, String xmlForA, String xmlForB) {
         boolean loggedA = sendOn(client, connected, xmlForA, LINK_STANDARD, null);
+        if (!elevatedCarries(kind)) return;
         // Read the field ONCE, and ask THAT socket — not the manager's flag, which could belong
         // to a replacement client dialled between this read and the send.
         TakClient b = videoClient;
         // Only offer A's wire as the thing to shorten against when A actually LOGGED it. With
         // the Standard connection down, "as above" would point at a line that is not there.
-        if (b != null) sendOn(b, videoConnected && b.isConnected(), xmlForB, LINK_ELEVATED,
-                loggedA ? xmlForA : null);
+        if (b != null) sendOn(b, videoConnected && b.isConnected(),
+                withoutContactEndpoint(xmlForB), LINK_ELEVATED, loggedA ? xmlForA : null);
+    }
+
+    /**
+     * The wire with the {@code endpoint} attribute of its {@code <contact>} removed, or the wire
+     * unchanged when it has none. Every message on the Elevated connection goes through this.
+     *
+     * ⚠ THE SERVER NAMES A CONNECTION AFTER THE CONTACT ENDPOINT IT SENDS. With the pilot report
+     * off B, the aircraft report is the one message on B that says "this is me", and with the
+     * endpoint a TAK client lists the AIRCRAFT as a user under the Elevated account.
+     * Only the pilot is a contact. Without the endpoint, B names nobody. The callsign stays, so
+     * the aircraft still has its name on the map. Pinned by VideoSplitPolicyTest.
+     */
+    static String withoutContactEndpoint(String xml) {
+        if (xml == null) return null;
+        return xml.replaceFirst("(<contact\\b[^>]*?)\\s+endpoint=\"[^\"]*\"", "$1");
     }
 
     /**
@@ -695,32 +747,28 @@ public class TakManager implements TakClient.TakClientListener {
                              int battery, String videoUrl) {
         if (client == null || !connected) return;
         boolean emergency = emergencyActiveNow();
+        // Built for cert A only: the pilot report never goes on cert B (see elevatedCarries).
+        // With the split configured, videoFor gives A no video, thus the pilot marker carries
+        // none; an application that passes a url here advertises it only with the split off or during
+        // an Emergency Broadcast.
         String urlA = videoFor("A", splitConfigured, emergency, videoUrl);
-        String urlB = videoFor("B", splitConfigured, emergency, videoUrl);
-        String xmlA, xmlB;
+        String xml;
         String where;
         if (location != null) {
             lastLat = location.getLatitude();
             lastLon = location.getLongitude();
             double ce = location.hasAccuracy() ? location.getAccuracy() : 0;
-            xmlA = CotBuilder.buildPLI(uid, pilotCallsign(callsign), PILOT_TEAM, role, true,
+            xml = CotBuilder.buildPLI(uid, pilotCallsign(callsign), PILOT_TEAM, role, true,
                     location.getLatitude(), location.getLongitude(), location.getAltitude(), ce,
                     location.getBearing(), location.getSpeed(), battery,
                     takvPlatform, deviceWithCallsign(callsign), takvOs, takvVersion, urlA);
-            xmlB = java.util.Objects.equals(urlA, urlB) ? xmlA : CotBuilder.buildPLI(uid, pilotCallsign(callsign),
-                    PILOT_TEAM, role, true, location.getLatitude(), location.getLongitude(),
-                    location.getAltitude(), ce, location.getBearing(), location.getSpeed(), battery,
-                    takvPlatform, deviceWithCallsign(callsign), takvOs, takvVersion, urlB);
             where = lastLat + "," + lastLon;
         } else {
-            xmlA = CotBuilder.buildPLINoFix(uid, pilotCallsign(callsign), PILOT_TEAM, role, battery,
+            xml = CotBuilder.buildPLINoFix(uid, pilotCallsign(callsign), PILOT_TEAM, role, battery,
                     takvPlatform, deviceWithCallsign(callsign), takvOs, takvVersion, urlA);
-            xmlB = java.util.Objects.equals(urlA, urlB) ? xmlA : CotBuilder.buildPLINoFix(uid, pilotCallsign(callsign),
-                    PILOT_TEAM, role, battery, takvPlatform, deviceWithCallsign(callsign), takvOs,
-                    takvVersion, urlB);
             where = "position not known";
         }
-        sendCotToBoth(xmlA, xmlB);
+        sendCot(Outbound.PILOT, xml, xml);
         AppLog.d(TAG, "Pilot PLI sent: " + pilotCallsign(callsign) + " @ " + where
                 + (videoUrl != null && !videoUrl.isEmpty() ? " (+video)" : ""));
     }
@@ -748,7 +796,7 @@ public class TakManager implements TakClient.TakClientListener {
                     location.getLatitude(), location.getLongitude(), location.getAltitude(),
                     location.getBearing(), location.getSpeed(), battery,
                     takvPlatform, deviceWithCallsign(callsign), takvOs, takvVersion);
-            sendCotToBoth(xml, xml);
+            sendCot(Outbound.PILOT, xml, xml);
             AppLog.d(TAG, "PLI sent: " + callsign + " @ " + lastLat + "," + lastLon);
             AppLog.d(TAG, "PLI XML: " + xml);
             if (!initialPliSent) {
@@ -812,9 +860,9 @@ public class TakManager implements TakClient.TakClientListener {
                     this.uid, ce, le);
             // Was client.sendMessage(xml) directly — bypassed the logged/redacted path AND sent
             // identically to every connection regardless of video policy. See the incident note
-            // on sendCotToBoth/sendOn above: that bypass is why a pilot who restricted this
+            // on sendCot/sendOn above: that bypass is why a pilot who restricted this
             // aircraft's audience still broadcast its position to everyone.
-            sendCotToBoth(xmlA, xmlB);
+            sendCot(Outbound.AIRCRAFT, xmlA, xmlB);
             AppLog.d(TAG, "Drone PLI sent: " + droneCallsign + " @ " + lat + "," + lon
                     + " alt=" + hae + " hdg=" + heading);
         }
@@ -834,10 +882,10 @@ public class TakManager implements TakClient.TakClientListener {
                                 double lat, double lon, double rangeM, double haeM) {
         if (client != null && connected) {
             String xml = CotBuilder.buildSensorPoint(spiUid, droneUid, callsign, lat, lon, rangeM, haeM);
-            // Was client.sendMessage(xml) directly — see the incident note on sendCotToBoth/
+            // Was client.sendMessage(xml) directly — see the incident note on sendCot/
             // sendOn above. This message carries no video element either way, so the same string
             // goes to both connections.
-            sendCotToBoth(xml, xml);
+            sendCot(Outbound.SENSOR_POINT, xml, xml);
             AppLog.d(TAG, "Camera point sent: " + callsign + " @ " + lat + "," + lon
                     + " range=" + Math.round(rangeM) + "m");
         }
@@ -847,7 +895,7 @@ public class TakManager implements TakClient.TakClientListener {
     public void sendFootprint(String uid, String callsign, double[][] corners) {
         if (client != null && connected && corners != null && corners.length >= 3) {
             String xml = CotBuilder.buildFootprintPolygon(uid, callsign, corners);
-            sendCotToBoth(xml, xml);
+            sendCot(Outbound.FOOTPRINT, xml, xml);
             AppLog.d(TAG, "Footprint sent: " + callsign + " (" + corners.length + " corners)");
         }
     }
@@ -856,7 +904,7 @@ public class TakManager implements TakClient.TakClientListener {
         if (client == null || !connected) return;
         String xml = CotBuilder.buildAlert(uid, callsign, team, role,
                 location.getLatitude(), location.getLongitude(), location.getAltitude(), alertType);
-        sendCotToBoth(xml, xml);
+        sendCot(Outbound.ALERT, xml, xml);
         int uidStart = xml.indexOf("uid=\"") + 5;
         int uidEnd = xml.indexOf("\"", uidStart);
         activeAlertId = xml.substring(uidStart, uidEnd);
@@ -866,7 +914,7 @@ public class TakManager implements TakClient.TakClientListener {
     public void cancelAlert() {
         if (client == null || !connected || activeAlertId == null) return;
         String xml = CotBuilder.buildAlertCancel(uid, callsign, activeAlertId);
-        sendCotToBoth(xml, xml);
+        sendCot(Outbound.ALERT, xml, xml);
         AppLog.d(TAG, "Alert cancelled: " + activeAlertId);
         activeAlertId = null;
     }
@@ -932,8 +980,8 @@ public class TakManager implements TakClient.TakClientListener {
         if (client == null || !connected) return null;
         String xml = CotBuilder.buildMarkerWithType(uid, callsign, markerUid, cotType,
                 lat, lon, alt, name, remarks, missionName, affiliationForLog);
-        sendCotToBoth(xml, xml);
-        // "QUEUED", not "sent". sendCotToBoth hands the message to a fire-and-forget writer thread and
+        sendCot(Outbound.MARKER, xml, xml);
+        // "QUEUED", not "sent". sendCot hands the message to a fire-and-forget writer thread and
         // this line runs whatever that thread then does with it. Saying "sent" here once hid a
         // failure: the log said every marker was sent while none arrived. The truth about
         // the wire is in the CoT OUT line above and in TakClient's failure lines.

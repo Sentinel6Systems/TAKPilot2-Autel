@@ -19,7 +19,7 @@ import org.junit.Test
  *     and read passphrase) from slot 2, no matter which slot is active.
  *
  * ⚠ **AND BOTH ARE PER-SLOT KEYS, WHICH THE STREAMER NEVER READS.** It reads `video_adv_*`,
- * written only by [VideoServersActivity.mirrorActiveSlot]. A fix that edits the slots and stops
+ * written only by [VideoServersPanel.mirrorActiveSlot]. A fix that edits the slots and stops
  * there is correct in every per-slot assertion and still advertises Server 2 on the next LIVE.
  */
 class AppModeVideoSlotTest {
@@ -28,9 +28,9 @@ class AppModeVideoSlotTest {
 
     @Test
     fun `an active slot 2 is forced back to slot 1`() {
-        val p = prefs(VideoServersActivity.KEY_V_ACTIVE_SLOT to 2)
+        val p = prefs(VideoServersPanel.KEY_V_ACTIVE_SLOT to 2)
         AppModeTransition.forceSingleVideoServer(p)
-        assertEquals(1, p.getInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, -1))
+        assertEquals(1, p.getInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, -1))
     }
 
     /**
@@ -40,11 +40,11 @@ class AppModeVideoSlotTest {
      */
     @Test
     fun `an advertisement pointing at the hidden server is switched off`() {
-        val p = prefs(VideoServersActivity.vKey(1, "advertise") to VideoServersActivity.ADV_OTHER)
+        val p = prefs(VideoServersPanel.vKey(1, "advertise") to VideoServersPanel.ADV_OTHER)
         AppModeTransition.forceSingleVideoServer(p)
         assertEquals(
-            VideoServersActivity.ADV_OFF,
-            p.getString(VideoServersActivity.vKey(1, "advertise"), null))
+            VideoServersPanel.ADV_OFF,
+            p.getString(VideoServersPanel.vKey(1, "advertise"), null))
     }
 
     /**
@@ -54,41 +54,41 @@ class AppModeVideoSlotTest {
      */
     @Test
     fun `the replacement is off and never self`() {
-        val p = prefs(VideoServersActivity.vKey(1, "advertise") to VideoServersActivity.ADV_OTHER)
+        val p = prefs(VideoServersPanel.vKey(1, "advertise") to VideoServersPanel.ADV_OTHER)
         AppModeTransition.forceSingleVideoServer(p)
-        val got = p.getString(VideoServersActivity.vKey(1, "advertise"), null)
-        assertEquals(false, got == VideoServersActivity.ADV_SELF)
+        val got = p.getString(VideoServersPanel.vKey(1, "advertise"), null)
+        assertEquals(false, got == VideoServersPanel.ADV_SELF)
     }
 
     @Test
     fun `a self advertisement is left alone`() {
-        val p = prefs(VideoServersActivity.vKey(1, "advertise") to VideoServersActivity.ADV_SELF)
+        val p = prefs(VideoServersPanel.vKey(1, "advertise") to VideoServersPanel.ADV_SELF)
         AppModeTransition.forceSingleVideoServer(p)
         assertEquals(
-            VideoServersActivity.ADV_SELF,
-            p.getString(VideoServersActivity.vKey(1, "advertise"), null))
+            VideoServersPanel.ADV_SELF,
+            p.getString(VideoServersPanel.vKey(1, "advertise"), null))
     }
 
     @Test
     fun `an off advertisement stays off`() {
-        val p = prefs(VideoServersActivity.vKey(1, "advertise") to VideoServersActivity.ADV_OFF)
+        val p = prefs(VideoServersPanel.vKey(1, "advertise") to VideoServersPanel.ADV_OFF)
         AppModeTransition.forceSingleVideoServer(p)
         assertEquals(
-            VideoServersActivity.ADV_OFF,
-            p.getString(VideoServersActivity.vKey(1, "advertise"), null))
+            VideoServersPanel.ADV_OFF,
+            p.getString(VideoServersPanel.vKey(1, "advertise"), null))
     }
 
     // ---- The plain keys the streamer reads ----
 
     /** A store advertising Server 2 through slot 1, with both servers fully configured. */
     private fun advertisingThroughServer2() = prefs(
-        VideoServersActivity.KEY_V_ACTIVE_SLOT to 1,
-        VideoServersActivity.vKey(1, "host") to "push.example.com",
-        VideoServersActivity.vKey(1, "advertise") to VideoServersActivity.ADV_OTHER,
-        VideoServersActivity.vKey(2, "host") to "hidden.example.com",
-        VideoServersActivity.vKey(2, "adv_transport") to "srt",
-        VideoServersActivity.vKey(2, "adv_srt_phrase") to "HIDDEN-PHRASE",
-    ).also { VideoServersActivity.mirrorActiveSlot(it) }
+        VideoServersPanel.KEY_V_ACTIVE_SLOT to 1,
+        VideoServersPanel.vKey(1, "host") to "push.example.com",
+        VideoServersPanel.vKey(1, "advertise") to VideoServersPanel.ADV_OTHER,
+        VideoServersPanel.vKey(2, "host") to "hidden.example.com",
+        VideoServersPanel.vKey(2, "adv_transport") to "srt",
+        VideoServersPanel.vKey(2, "adv_srt_phrase") to "HIDDEN-PHRASE",
+    ).also { VideoServersPanel.mirrorActiveSlot(it) }
 
     /** Precondition for the next test: the plain keys really do name the hidden server. */
     @Test
@@ -108,7 +108,7 @@ class AppModeVideoSlotTest {
     fun `after forcing a single server the streamer no longer advertises the hidden one`() {
         val p = advertisingThroughServer2()
         AppModeTransition.forceSingleVideoServer(p)
-        VideoServersActivity.mirrorActiveSlot(p)
+        VideoServersPanel.mirrorActiveSlot(p)
         assertFalse("video_adv_on is what the streamer reads; it must be off",
             p.getBoolean("video_adv_on", true))
     }
@@ -126,21 +126,21 @@ class AppModeVideoSlotTest {
     @Test
     fun `the read leg follows the host when the active server changes`() {
         val p = prefs(
-            VideoServersActivity.KEY_V_ACTIVE_SLOT to 1,
-            VideoServersActivity.vKey(1, "host") to "one.example.com",
-            VideoServersActivity.vKey(1, "adv_transport") to "srt",
-            VideoServersActivity.vKey(1, "adv_srt_port") to 8890,
-            VideoServersActivity.vKey(1, "adv_srt_phrase") to "PHRASE-ONE",
-            VideoServersActivity.vKey(2, "host") to "two.example.com",
-            VideoServersActivity.vKey(2, "adv_transport") to "rtsp",
-            VideoServersActivity.vKey(2, "adv_srt_port") to 9990,
-            VideoServersActivity.vKey(2, "adv_srt_phrase") to "",
+            VideoServersPanel.KEY_V_ACTIVE_SLOT to 1,
+            VideoServersPanel.vKey(1, "host") to "one.example.com",
+            VideoServersPanel.vKey(1, "adv_transport") to "srt",
+            VideoServersPanel.vKey(1, "adv_srt_port") to 8890,
+            VideoServersPanel.vKey(1, "adv_srt_phrase") to "PHRASE-ONE",
+            VideoServersPanel.vKey(2, "host") to "two.example.com",
+            VideoServersPanel.vKey(2, "adv_transport") to "rtsp",
+            VideoServersPanel.vKey(2, "adv_srt_port") to 9990,
+            VideoServersPanel.vKey(2, "adv_srt_phrase") to "",
         )
-        VideoServersActivity.mirrorActiveSlot(p)
+        VideoServersPanel.mirrorActiveSlot(p)
         assertEquals("srt", p.getString("video_adv_transport", null))
 
-        p.edit().putInt(VideoServersActivity.KEY_V_ACTIVE_SLOT, 2).apply()
-        VideoServersActivity.mirrorActiveSlot(p)
+        p.edit().putInt(VideoServersPanel.KEY_V_ACTIVE_SLOT, 2).apply()
+        VideoServersPanel.mirrorActiveSlot(p)
 
         assertEquals("two.example.com", p.getString("video_adv_host", null))
         assertEquals("the transport must be server 2's, not server 1's",
@@ -158,10 +158,10 @@ class AppModeVideoSlotTest {
     fun `an out-of-range active slot mirrors slot 1, not an empty slot`() {
         for (bad in listOf(0, 3, -1)) {
             val p = prefs(
-                VideoServersActivity.KEY_V_ACTIVE_SLOT to bad,
-                VideoServersActivity.vKey(1, "host") to "one.example.com",
+                VideoServersPanel.KEY_V_ACTIVE_SLOT to bad,
+                VideoServersPanel.vKey(1, "host") to "one.example.com",
             )
-            VideoServersActivity.mirrorActiveSlot(p)
+            VideoServersPanel.mirrorActiveSlot(p)
             assertEquals("slot $bad", "one.example.com", p.getString("video_host", null))
         }
     }
@@ -170,10 +170,10 @@ class AppModeVideoSlotTest {
     @Test
     fun `the mirror still carries the active server's profile`() {
         val p = prefs(
-            VideoServersActivity.KEY_V_ACTIVE_SLOT to 2,
-            VideoServersActivity.vKey(2, "profile") to "high",
+            VideoServersPanel.KEY_V_ACTIVE_SLOT to 2,
+            VideoServersPanel.vKey(2, "profile") to "high",
         )
-        VideoServersActivity.mirrorActiveSlot(p)
+        VideoServersPanel.mirrorActiveSlot(p)
         assertEquals("high", p.getString("video_profile", null))
     }
 }

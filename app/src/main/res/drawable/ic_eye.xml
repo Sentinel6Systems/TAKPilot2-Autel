@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Show what is typed", for PasswordEye. Drawn for this application. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp" android:height="16dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M2,12 C5,6 19,6 22,12 C19,18 5,18 2,12 Z"
+        android:strokeColor="@color/tp_text_secondary" android:strokeWidth="1.8"
+        android:fillColor="#00000000" />
+    <path android:pathData="M12,9 A3,3 0 1,0 12.01,9 Z"
+        android:fillColor="@color/tp_text_secondary" />
+</vector>

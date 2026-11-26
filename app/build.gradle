@@ -46,8 +46,8 @@ android {
         targetSdkVersion 29
         // versionName is real semver: TestApplication reports it as <takv version> on every PLI,
         // so it is what a TAK server shows for this client. versionCode only orders installs.
-        versionCode 117
-        versionName "2.5.2"
+        versionCode 118
+        versionName "2.5.3"
         multiDexEnabled true
         if (keystorePropsFile.exists()) {
             signingConfig signingConfigs.config

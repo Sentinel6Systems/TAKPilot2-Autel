@@ -1,40 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- TAK SERVER — the set-once connection configuration, kept off Pre-Flight (design
-     decision). Same reasoning, and the same shape, as activity_video_servers.xml for the
-     video settings: Pre-Flight keeps what a pilot READS before a flight —
-     which user is connected and which channels are live — and the controls that are entered
-     once and then locked live here.
+<!-- THE TAK SERVER CONFIGURATION, shown in the TAK group of Pre-Flight.
+     This was its own screen, behind a "Configure TAK
+     Server" button. The left rail gives each group its own page, so the configuration is back
+     with its summary.
 
-     This screen owns BOTH ACCOUNTS. The Standard account is the one every message goes out
-     on; the Elevated account carries the live-video link to a smaller audience. They share a
-     host and two ports, because they are one controller under two certificates.
-
-     ⚠ THE LOCK IS HERE TOO, unlike the video screen, whose lock stayed on Pre-Flight to guard
-     the active-server toggle it left behind. Nothing of the TAK configuration stays on
-     Pre-Flight, so there is nothing there for a lock to guard.
+     It holds BOTH ACCOUNTS. The Standard account is the one every message goes out on; the
+     Elevated account carries the live-video link to a smaller audience. They share a host and
+     two ports, because they are one controller with two certificates.
 
      ⚠ NOTHING MIGRATED. Every id below is the id it had on Pre-Flight and every preference key
      is the key that was already written, so a controller that upgrades finds its server
-     configured. -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/tp_bg_screen"
-    android:fillViewport="true">
+     configured.
 
-    <LinearLayout
+     No ScrollView here: the Pre-Flight page scrolls. TakServerPanel binds this panel. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:paddingTop="12dp">
 
-        <!-- The host and the lock share a row. The lock is at the TOP of the section, beside
-             the first field it guards, rather than at the foot: it was a long scroll away from
-             everything it governs. It still disables Log Out further down — see takLockedFields
-             — which is the destructive control it exists to stand in front of.
-
-             The lock column takes layout_gravity="bottom" so the box sits level with the field,
-             which is one label lower than the top of the row. -->
+        <!-- The lock was in this row, beside the host. It is in the title row of the TAK
+             group now (activity_tak_connect.xml). It still disables Log Out further down —
+             see takLockedFields. -->
         <LinearLayout style="@style/takFormRow">
             <LinearLayout style="@style/takColumn"
                 android:layout_weight="2">
@@ -44,18 +31,6 @@
                     style="@style/takFieldStyle"
                     android:hint="tak.example.com"
                     android:inputType="textUri" />
-            </LinearLayout>
-
-            <LinearLayout style="@style/takColumn"
-                android:layout_gravity="bottom">
-                <CheckBox
-                    android:id="@+id/takLockConfig"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:buttonTint="@color/tp_accent"
-                    android:text="Lock configuration"
-                    android:textColor="@color/tp_text_primary"
-                    android:textSize="14sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -215,7 +190,7 @@
              the reasoning that this application never changes what the Elevated account is a
              member of. That was reversed: a server administrator may put that account in
              several channels, and the pilot has to choose which of them the aircraft reaches. Behind the same lock as the Standard
-             rows — see TakServerActivity.renderVideoChannels. -->
+             rows — see TakServerPanel.renderVideoChannels. -->
         <!-- ⚠ ONE CONTAINER FOR THE WHOLE ELEVATED ACCOUNT, its section rule included, so
              BASIC mode hides it with a single id and leaves no stray rule at the foot of the
              screen. See AppMode. -->
@@ -243,7 +218,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Only the channel this account belongs to gets the live-video link. Every other channel still gets the position and the markers, with no video."
+            android:text="Only the channel of this account gets the live-video link. All other channels get the position and the markers, but no video."
             android:textColor="@color/tp_text_tertiary"
             android:textSize="12sp" />
 
@@ -316,7 +291,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Elevated account channels. Untick a channel to stop it reaching this account — that is also how you stop data arriving on it. ⚠ This account is shared by every controller, so a change here applies to all of them."
+            android:text="Channels of the Elevated account. Clear the tick of a channel to remove it from this account. Data from that channel then stops too. ⚠ All controllers share this account, so a change here applies to all of them."
             android:textColor="@color/tp_text_tertiary"
             android:textSize="12sp"
             android:visibility="gone" />
@@ -329,5 +304,4 @@
             android:layout_marginTop="4dp" />
         </LinearLayout>
 
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>

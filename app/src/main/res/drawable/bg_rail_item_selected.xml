@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The selected item of a left rail (RailItems.markRailItem): a lighter fill and an accent bar
+     at the start, so the pilot sees which group is open and that the rail is a list of groups.
+     The bar is the accent layer showing past the start inset of the fill (an inset, not a
+     layer width, which needs API 23). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/tp_accent" />
+        </shape>
+    </item>
+    <item android:left="@dimen/preflight_rail_mark">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/tp_surface_field" />
+        </shape>
+    </item>
+</layer-list>

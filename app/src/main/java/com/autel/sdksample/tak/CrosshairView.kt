@@ -150,9 +150,9 @@ class CrosshairView @JvmOverloads constructor(
      *  flight screen. */
     var onReticleTap: (() -> Unit)? = null
 
-    /** Long-press inside the reticle — drop a NEW stationary Unknown marker at the look point.
-     *  This is NOT the quick marker: see FlightActivity.onUnknownMarkerAction. Set by the flight
-     *  screen. */
+    /** Long-press inside the reticle — drop a NEW stationary marker, of the type the pilot
+     *  chooses, at the look point. This is NOT the quick marker: see
+     *  FlightActivity.onStaticMarkerAction. Set by the flight screen. */
     var onReticleLongPress: (() -> Unit)? = null
 
     private val gesture = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {

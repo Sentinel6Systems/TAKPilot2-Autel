@@ -290,9 +290,9 @@
         android:textColor="@color/tp_text_primary"
         android:textSize="14sp"
         android:textStyle="bold" />
-    <!-- Thermal: switches the FPV between the visible camera and the 640T's IR sensor.
-         Sits next to the zoom pill because both change what the camera is showing rather
-         than what the app does with it. -->
+    <!-- IR: switches the FPV between the visible (RGB) camera and full-screen thermal
+         (design decision). Sits next to the zoom pill because both change what the camera
+         is showing rather than what the app does with it. -->
     <TextView
         android:id="@+id/flightIrButton"
         android:layout_marginTop="18dp"
@@ -305,21 +305,22 @@
         android:textColor="@color/tp_text_primary"
         android:textSize="14sp"
         android:textStyle="bold" />
-    <!-- The thermal expand / contract PILL: under the PIP pill, only
-         while thermal is on screen. In PIP its icon makes thermal full screen; in full thermal
-         it puts the window back. Same 66x42 pill as the rest; the icon is
-         a rounded frame with a solid square in the lower-left and an arrow. Gone in visible,
-         and the column closes up. -->
-    <ImageButton
-        android:id="@+id/flightPipSizeButton"
+    <!-- The PIP PILL (design decision, made in flight): under the IR pill, only while the
+         thermal camera is on screen. From full IR a tap enters PIP; in PIP a tap goes back to
+         full IR. It replaced an earlier expand / contract icon pill. Gone in RGB, and
+         the column closes up. -->
+    <TextView
+        android:id="@+id/flightPipButton"
         android:layout_marginTop="18dp"
         android:layout_width="66dp"
         android:layout_height="42dp"
         android:background="@drawable/bg_zoom_pill"
-        android:contentDescription="Thermal full screen or window"
-        android:padding="7dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_pip_expand"
+        android:contentDescription="Picture in picture"
+        android:gravity="center"
+        android:text="PIP"
+        android:textColor="@color/tp_text_primary"
+        android:textSize="14sp"
+        android:textStyle="bold"
         android:visibility="gone" />
     <!-- Zoom pill. It set the 54dp that AR, IR and the lights now share: the right zoom
          rocker puts fractional values in here ("2.4X"), which is four glyphs where the
@@ -502,15 +503,18 @@
 
     <!-- BVLOS antenna-aim arc: pilot dot at the centre, aircraft
          marker riding the semicircle at its bearing relative to the controller's facing —
-         marker at the TOP of the arc means the antennas face the aircraft. Bottom centre,
-         clear of the bottom-left radar labels and the right HUD column. Hidden until the
-         flight screen has a compass facing, a pilot fix, and an aircraft fix. -->
+         marker at the TOP of the arc means the antennas face the aircraft. Hidden until the
+         flight screen has a compass facing, a pilot fix, and an aircraft fix.
+         ⚠ NOT bottom centre any more (design decision):
+         half size, against the left edge of the small map, bottom level with it. See
+         flight_antenna_arc_margin_end. Red when the controller's compass is not reliable. -->
     <com.autel.sdksample.tak.AntennaAimView
         android:id="@+id/fpvAntennaArc"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="16dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="@dimen/flight_antenna_arc_margin_end"
+        android:layout_marginBottom="12dp"
         android:visibility="gone" />
 
     <!-- RIGHT-HAND HUD COLUMN: telemetry readout, gimbal look

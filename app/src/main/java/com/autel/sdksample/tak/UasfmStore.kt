@@ -20,7 +20,7 @@ import kotlin.math.min
  * **Source.** The FAA's live ArcGIS feature service, queried as Esri JSON with
  * `returnGeometry=false` — we only need each cell's CEILING plus its centre LATITUDE/LONGITUDE,
  * because the cells sit on a fixed 1/120° grid (see [UasfmIndex]). Dropping geometry is what
- * takes a statewide pull from tens of MB of polygon rings down to a couple of MB of attributes.
+ * takes a pull for a large area from tens of MB of polygon rings down to a couple of MB of attributes.
  *
  * **This is advisory data.** UASFM shows the altitudes at which the FAA is *likely* to approve a
  * Part 107 authorization without extra analysis. It is not an authorization, it is not updated in
@@ -35,24 +35,24 @@ object UasfmStore {
     /**
      * FAA UAS Data Delivery System feature service — the LIVE published layer.
      *
-     * **Do not "upgrade" this to one of the suffixed siblings.** That server hosts several
+     * **Do not "upgrade" this to one of the suffixed layers beside it.** That server hosts several
      * UASFM layers and the names are actively misleading:
      *
-     * | Layer | Ceiling at one test cell | MAP_EFF |
+     * | Layer | Ceiling in one checked cell | MAP_EFF |
      * |---|---|---|
-     * | `FAA_UAS_FacilityMap_Data` (this one) | 200 | current |
-     * | `FAA_UAS_FacilityMap_Data_Primary` | 0 | 1/26/2023 |
-     * | `FAA_UAS_FacilityMap_Data_V5` | 0 | 10/6/2022 |
+     * | `FAA_UAS_FacilityMap_Data` (this one) | a non-zero ceiling | current |
+     * | `FAA_UAS_FacilityMap_Data_Primary` | 0 | years old |
+     * | `FAA_UAS_FacilityMap_Data_V5` | 0 | years old |
      *
      * `_V5` reads like "version 5, therefore newest" — it is not; it sits alongside `_V5_Dev`
      * and `_V5_AppTest` and is a stale snapshot. This app shipped against `_V5` and reported
-     * a **0 ft ceiling in a real 200 ft grid**, from data nearly four years out of
-     * date. Caught by a pilot standing in the cell, cross-checked against the
-     * FAA's own "Visualize it" viewer, which agrees with this layer.
+     * a **0 ft ceiling in a grid that has a non-zero ceiling**, from data years out of date.
+     * Caught by a spot check, cross-checked against the FAA's own
+     * "Visualize it" viewer, which agrees with this layer.
      *
      * **`MAP_EFF` is the tell.** If a spot check ever returns an effective date that isn't
-     * roughly current, the layer is wrong — that field was visible in the original research and
-     * showing 2022, and not questioning it is what let this through.
+     * roughly current, the layer is wrong — that field was visible when the layer was first
+     * chosen and was already years old, and not questioning it is what let this through.
      */
     private const val SERVICE_URL =
         "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/" +
@@ -254,8 +254,9 @@ object UasfmStore {
         }
         if (byCell.isEmpty()) {
             return DownloadResult(null,
-                "No FAA facility-map cells in that area. Outside controlled airspace the Part 107 " +
-                    "400 ft limit applies and the FAA publishes no cells.", offGrid)
+                "The FAA has no ceiling data for that area. It is probably uncontrolled " +
+                    "airspace, where the 400 ft limit of Part 107 applies. Nothing was changed.",
+                offGrid)
         }
 
         val cells = byCell.map { (k, ceiling) ->

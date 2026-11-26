@@ -175,7 +175,7 @@ class ScreenCaptureEncoder(
      * format.** `OMX.qcom.video.encoder.hevc` on this build is a legacy OMX component (not
      * Codec2), and it failed `configureCodec` with error -38 when handed KEY_PROFILE and
      * KEY_MAX_FPS_TO_ENCODER. Legacy OMX components commonly reject KEY_PROFILE unless a
-     * matching KEY_LEVEL is supplied, and often do not implement the API-30 max-fps key at all.
+     * matching KEY_LEVEL is supplied, and often do not implement the API-29 max-fps key at all.
      *
      * The order below drops the least important first, so a device that accepts everything
      * still gets CBR and an explicit profile. Which variant won is logged, so a future device
@@ -225,7 +225,9 @@ class ScreenCaptureEncoder(
                     f.setInteger(MediaFormat.KEY_PROFILE, codec.profile)
                     f.setInteger(MediaFormat.KEY_LEVEL, codec.level)
                     noBFrames(f)
-                    if (Build.VERSION.SDK_INT >= 30) {
+                    // FROM ANDROID 10 (API 29), NOT 11: the key is public since API 29. The gate
+                    // was at 30, and an Android 10 controller then got NO frame-rate cap.
+                    if (Build.VERSION.SDK_INT >= 29) {
                         f.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, profile.fps.toFloat())
                     }
                 },
@@ -251,7 +253,7 @@ class ScreenCaptureEncoder(
                 // the cap is worth.
                 Variant("max-fps, no profile/level ($label)") { f ->
                     f.setInteger(MediaFormat.KEY_BITRATE_MODE, mode)
-                    if (Build.VERSION.SDK_INT >= 30) {
+                    if (Build.VERSION.SDK_INT >= 29) {
                         f.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, profile.fps.toFloat())
                     }
                 },

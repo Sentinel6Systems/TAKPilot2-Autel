@@ -34,9 +34,12 @@ class TakConnectActivity : AppCompatActivity() {
         // A debounced write must not outlive the screen that scheduled it — leaving the pilot's
         // half-typed value to land on the aircraft after they navigated away.
         cancelPendingSettingPushes()
-        // ⚠ THE TAK LISTENERS ARE NOT HERE ANY MORE. They went to TakServerActivity with the
-        // TAK configuration, and that screen attaches and removes its
-        // own. This screen holds none, so there is nothing here to detach.
+        // The TAK listeners belong to TakServerPanel, which attaches them in bind(). They hold
+        // this Activity and TakManager outlives it, so the panel removes them here.
+        if (::takPanel.isInitialized) takPanel.release()
+        // The map download's callback: only our own, because a rebuilt screen sets its own
+        // before this old one is destroyed.
+        if (CustomMapTiles.onChanged === mapDownloadCb) CustomMapTiles.onChanged = null
         super.onDestroy()
     }
 
@@ -68,24 +71,40 @@ class TakConnectActivity : AppCompatActivity() {
         setupDroneSettingsSection()
         setupDtedSection()
         setupUasfmSection()
+        setupMapDisplay()
 
         wireAvoidanceSection()
         wireControlRatesSection()
-
-        // ⚠ THE TAK CONFIGURATION IS NOT ON THIS SCREEN — it
-        // is in TakServerActivity, the same move VideoServersActivity made. What
-        // stays is the summary a pilot reads before a flight. See paintTakSummary.
-        findViewById<Button>(R.id.takConfigureServer).setOnClickListener {
-            AppLog.v(TAG, "tap: Configure TAK Server")
-            startActivity(Intent(this, TakServerActivity::class.java))
-        }
 
         // The summary is painted here AND on every resume — see onResume for why.
         paintTakSummary()
 
         setupVideoControls(prefs)
 
+        // THE TAK AND VIDEO SERVER CONFIGURATION IS ON THIS SCREEN AGAIN (design decision),
+        // in the TAK group and the Video group. Each was its own screen
+        // behind a "Configure…" button while Pre-Flight was one long column. The two panels keep
+        // their own code; this screen gives them its views and its onDestroy.
+        // A change in a panel can change what the three generated summaries say, so each panel
+        // calls back and the summaries are painted again.
+        val repaintSummaries = {
+            if (!isDestroyed) {
+                paintVideoSummary(prefs)
+                paintTakSummary()
+                paintAppModeSummary(prefs)
+            }
+        }
+        videoPanel = VideoServersPanel(this, onChanged = repaintSummaries).also { it.bind() }
+        takPanel = TakServerPanel(
+            this,
+            onChanged = repaintSummaries,
+            // The callsign can change the Broadcast ID of a video server. The cards must show
+            // the new value: a card that keeps the old text writes it back at its next edit.
+            onVideoIdsChanged = { videoPanel.reload() },
+        ).also { it.bind() }
+
         setupAppModeSection(prefs)
+        setupRail()
 
         // LAST, deliberately: every other setup call above populates or rebinds these fields,
         // and the lock has to be the final word on whether they are editable. Applying it
@@ -106,11 +125,10 @@ class TakConnectActivity : AppCompatActivity() {
      * The video controls that change in the field: the quality, every flight, and which server
      * is active, per callout.
      *
-     * ⚠ **Everything else is in [VideoServersActivity]** (design decision). Twenty
-     * set-once controls in one column made the sub-sections easy to mix up, and the worst of
-     * it was that every field belonged to whichever server the toggle above had selected —
-     * nothing said which one once the pilot had scrolled into them. The servers screen shows
-     * both at once and each field writes its own.
+     * ⚠ **Everything else is in [VideoServersPanel]**, the two server cards below these
+     * controls. Every field there once belonged to whichever server the toggle above had
+     * selected, and nothing said which one once the pilot had scrolled into them. The
+     * cards show both at once and each field writes its own.
      *
      * The summary line is generated so it cannot go stale: it states where the video is pushed
      * and what the CoT will tell the team, which is what a pilot needs to read before a flight.
@@ -125,21 +143,15 @@ class TakConnectActivity : AppCompatActivity() {
         val vProfileGroup = findViewById<android.widget.RadioGroup>(R.id.videoProfileGroup)
         val vSummary = findViewById<TextView>(R.id.videoSummary)
 
-        // ⚠ BASIC HAS ONE VIDEO SERVER, so the choice between two is hidden — but ONLY the label
-        // and the radios, never the row. The row also holds videoLockConfig. Hiding it would NOT
-        // trip ConfigLock's early return (findViewById still finds a GONE view; that return fires
-        // only on an id missing from the layout) — it would leave the lock APPLIED AND
-        // UNREACHABLE: a locked controller whose video configuration nobody can unlock, in the
-        // mode whose whole point is the free unlock.
-        // ⚠ INVISIBLE, not GONE, for BOTH. The row is weighted, and with the
-        // group GONE the lock box stretched into a full-width, unlabelled touch target; with the
-        // label GONE the lock row rose under "High", the most-touched control here, where a low
-        // tap unlocked with no prompt. INVISIBLE keeps the box where it always is, and an
-        // INVISIBLE view takes no touches.
+        // BASIC HAS ONE VIDEO SERVER, so the choice between two is hidden: GONE.
+        // The label and the group were INVISIBLE while the lock box shared their row: a GONE
+        // group let the box stretch, and a GONE label pulled the box up under the
+        // quality radios. The lock is in the title row now and does not move when
+        // these go. A hidden radio still refuses Server 2 at the write, below.
         if (!AppMode.secondVideoServerAllowed(prefs)) {
             findViewById<TextView>(R.id.videoActiveServerLabel).visibility =
-                android.view.View.INVISIBLE
-            vServerGroup.visibility = android.view.View.INVISIBLE
+                android.view.View.GONE
+            vServerGroup.visibility = android.view.View.GONE
         }
 
         fun selectedProfile(): String = when (vProfileGroup.checkedRadioButtonId) {
@@ -187,11 +199,10 @@ class TakConnectActivity : AppCompatActivity() {
             // slot — so a change here makes both stale on this same screen.
             paintTakSummary()
             paintAppModeSummary(prefs)
+            // The ACTIVE badge on the server cards follows the toggle. Not during onCreate:
+            // the cards are bound after this function.
+            if (::videoPanel.isInitialized) videoPanel.reload()
             AppLog.i(TAG, "active video server -> slot $slot (${slotName(prefs, slot)})")
-        }
-
-        findViewById<android.widget.Button>(R.id.videoConfigureServers).setOnClickListener {
-            startActivity(android.content.Intent(this, VideoServersActivity::class.java))
         }
 
         vServerGroup.check(
@@ -205,20 +216,21 @@ class TakConnectActivity : AppCompatActivity() {
         mirrorActiveSlot(prefs)
     }
 
+    /** The two configuration panels that were their own screens. See onCreate. */
+    private lateinit var videoPanel: VideoServersPanel
+    private lateinit var takPanel: TakServerPanel
+
     /**
-     * ⚠ The servers screen can rename a server, change its transport or change where it
-     * advertises, and all three show in section 2. Without this the pilot comes back to a
-     * summary line describing the configuration as it was BEFORE they edited it — which is
-     * worse than no summary, because it reads as authoritative.
+     * The summaries are painted again on every resume: the flight screen and the mode change
+     * can change what they report while this screen is not showing.
      */
     override fun onResume() {
         super.onResume()
         val p = getSharedPreferences("takpilot2_tak", MODE_PRIVATE)
         paintVideoSummary(p)
         mirrorActiveSlot(p)
-        // §6 is GENERATED from state that the TAK Server and Video Servers screens change, so it
-        // is repainted here as well as in onCreate — painted once, it went stale about who
-        // receives the video when the pilot came back from either screen.
+        // The mode summary is GENERATED from state that other screens change, so it is
+        // repainted here as well as in onCreate.
         paintAppModeSummary(p)
         // ⚠ RETRY THE TAK CONNECTION HERE. Before the TAK configuration moved to its own
         // screen this screen's onCreate did it on the way past, through its
@@ -226,9 +238,14 @@ class TakConnectActivity : AppCompatActivity() {
         // screen a pilot actually opens before a flight, so it is the right place for it —
         // see TakAutoConnect.retryIfDown for the whole fault.
         TakAutoConnect.retryIfDown(applicationContext)
-        // Repainted on EVERY resume, not only on create: coming back from TakServerActivity is
-        // the one moment the summary is most likely to be wrong, because the pilot just went
-        // there to change exactly what it reports.
+        // The values under the Aircraft fields: ask the aircraft now, not only after an Apply.
+        // Reads only. With no aircraft there is nothing to ask and the lines keep their dash.
+        renderAircraftLine()
+        readAircraftValues()
+        // The download runs on with this screen closed; show where it is now.
+        renderMapDownload()
+        // Repainted on EVERY resume, not only on create: the connection can change while the
+        // pilot is on another screen.
         paintTakSummary()
         setupSdCardSection()
         sdHandler.post(sdTick)
@@ -258,6 +275,7 @@ class TakConnectActivity : AppCompatActivity() {
     private val sdTick = object : Runnable {
         override fun run() {
             renderSdCard()
+            renderAircraftLine()
             sdHandler.postDelayed(this, 1000)
         }
     }
@@ -280,7 +298,7 @@ class TakConnectActivity : AppCompatActivity() {
         com.autel.common.camera.base.SDCardState.CARD_PROTECT -> "Write protected"
         com.autel.common.camera.base.SDCardState.FORMATTING -> "Formatting"
         com.autel.common.camera.base.SDCardState.LOW_SPEED_CARD -> "Slow card"
-        com.autel.common.camera.base.SDCardState.LOW_SPEED_CARD_STOP_RECORD -> "Slow card — recording stopped"
+        com.autel.common.camera.base.SDCardState.LOW_SPEED_CARD_STOP_RECORD -> "Slow card. Recording stopped."
         com.autel.common.camera.base.SDCardState.UNKNOWN_FILE_SYSTEM_FAT -> "Unknown file system"
         else -> s.name
     }
@@ -330,7 +348,7 @@ class TakConnectActivity : AppCompatActivity() {
             com.autel.common.camera.media.SaveLocation.FLASH_CARD
         val text = when {
             blocked != null -> blocked
-            notTarget -> "The camera is recording to internal storage, not this card."
+            notTarget -> "The camera saves to its internal memory, not to this card."
             else -> ""
         }
         status.text = text
@@ -352,8 +370,8 @@ class TakConnectActivity : AppCompatActivity() {
         android.app.AlertDialog.Builder(this, R.style.TakDialogTheme_Destructive)
             .setTitle("Format the memory card?")
             .setMessage(
-                "This erases everything on the SD card in the aircraft. " +
-                "Photographs and video cannot be recovered.\n\n" +
+                "This erases all data on the memory card in the aircraft. " +
+                "You cannot get the photos and videos back.\n\n" +
                 "Free space now: ${freeText(AutelProductHolder.sdFreeMb)}")
             .setPositiveButton("Format") { _, _ ->
                 // ⚠ RE-CHECKED AT THE MOMENT OF THE ACTION. The button's enabled state comes from
@@ -362,7 +380,7 @@ class TakConnectActivity : AppCompatActivity() {
                 // read would need a second fly-controller listener, and that slot holds one
                 // client.
                 if (AutelTakBridge.airborne) {
-                    Toast.makeText(this, "Not formatted — the aircraft is flying.",
+                    Toast.makeText(this, "The card was not formatted. The aircraft is flying.",
                         Toast.LENGTH_LONG).show()
                     AppLog.i(TAG, "format SD card refused: aircraft flying")
                 } else {
@@ -386,7 +404,7 @@ class TakConnectActivity : AppCompatActivity() {
                     AppLog.i(TAG, "format SD card accepted by the camera")
                     // NOT "done". The camera has taken the request; the CARD STATE is what says
                     // it finished, and it arrives on the 2 Hz push that renderSdCard() reads.
-                    runOnUiThread { showSdStatus(status, "The camera accepted the request.") }
+                    runOnUiThread { showSdStatus(status, "The camera accepted the format command.") }
                 }
                 override fun onFailure(error: com.autel.common.error.AutelError?) {
                     AppLog.w(TAG, "format SD card refused: ${error?.description}")
@@ -409,7 +427,7 @@ class TakConnectActivity : AppCompatActivity() {
         prefs.getString(vKey(slot, "name"), "")?.takeIf { it.isNotBlank() } ?: "Server $slot"
 
     /**
-     * The server buttons and the one-line summary — everything in section 2 that the servers
+     * The server buttons and the one-line summary — everything in section 3 that the servers
      * screen can change.
      *
      * Derived text only, so it is safe to call on every resume: it attaches no listener and
@@ -423,7 +441,7 @@ class TakConnectActivity : AppCompatActivity() {
         val slot = activeVideoSlot(prefs)
         val host = prefs.getString(vKey(slot, "host"), "") ?: ""
         if (host.isEmpty()) {
-            summary.text = "No video server set. Touch Configure Video Servers."
+            summary.text = "No video server set. Type the server settings below."
             return
         }
         val transport = VideoTransport.fromPref(prefs.getString(vKey(slot, "transport"), null))
@@ -459,7 +477,7 @@ class TakConnectActivity : AppCompatActivity() {
 
     /**
      * Copies the ACTIVE slot onto the plain `video_*` keys that [AutelVideoStreamer] reads.
-     * A short name for [VideoServersActivity.mirrorActiveSlot], the one mirror.
+     * A short name for [VideoServersPanel.mirrorActiveSlot], the one mirror.
      *
      * ⚠ The streamer knows nothing about slots, so an edit that is not mirrored is an edit the
      * stream never sees. Two places change WHICH slot is active — this screen's radios and
@@ -469,7 +487,7 @@ class TakConnectActivity : AppCompatActivity() {
         // ⚠ THIS USED TO BE A SECOND COPY. The two had drifted (this one wrote video_profile and
         // the other did not), and that kind of drift is a live bug. One mirror now — see
         // its doc.
-        VideoServersActivity.mirrorActiveSlot(prefs)
+        VideoServersPanel.mirrorActiveSlot(prefs)
 
     /** Preference key for one field of one video server slot. */
     private fun vKey(slot: Int, base: String) = "video_s${slot}_$base"
@@ -552,6 +570,50 @@ class TakConnectActivity : AppCompatActivity() {
      * A new onCreate also re-runs setupConfigLocks LAST, which is the ordering this screen
      * depends on.
      */
+    /**
+     * THE LEFT RAIL (design decision). One section group shows at
+     * a time. The other groups are GONE, not removed: every `setup…` function still finds its
+     * views, and [setupConfigLocks] still runs last.
+     *
+     * ⚠ THE SELECTED GROUP IS KEPT IN THE INTENT, NOT IN SAVED STATE. A mode change builds
+     * this screen again with [rebuildWithoutSavedState], which copies the intent and drops the
+     * saved state on purpose. The intent is thus the one place that survives it, and the pilot
+     * comes back to the group they changed the mode from.
+     */
+    private val railTabs = listOf(
+        R.id.pfRailAircraft to R.id.pfTabAircraft,
+        R.id.pfRailMemoryCard to R.id.pfTabMemoryCard,
+        R.id.pfRailTak to R.id.pfTabTak,
+        R.id.pfRailVideo to R.id.pfTabVideo,
+        R.id.pfRailMapData to R.id.pfTabMapData,
+        R.id.pfRailMode to R.id.pfTabMode,
+    )
+
+    private fun setupRail() {
+        for ((index, tab) in railTabs.withIndex()) {
+            findViewById<TextView>(tab.first).setOnClickListener {
+                AppLog.v(TAG, "tap: rail item $index")
+                showRailTab(index)
+                // The new group starts at its top, not at the scroll position of the last one.
+                findViewById<android.widget.ScrollView>(R.id.pfScroll).scrollTo(0, 0)
+            }
+        }
+        showRailTab(intent.getIntExtra(EXTRA_RAIL_TAB, 0))
+    }
+
+    /** Shows one group and marks its rail item. An index out of range shows the first group. */
+    private fun showRailTab(requested: Int) {
+        val index = if (requested in railTabs.indices) requested else 0
+        intent.putExtra(EXTRA_RAIL_TAB, index)
+        for ((i, tab) in railTabs.withIndex()) {
+            val selected = i == index
+            findViewById<android.view.View>(tab.second).visibility =
+                if (selected) android.view.View.VISIBLE else android.view.View.GONE
+            // One function with the Field Guide's rail, so the two rails look the same.
+            findViewById<TextView>(tab.first).markRailItem(selected)
+        }
+    }
+
     private fun rebuildWithoutSavedState() {
         val fresh = Intent(intent)
         finish()
@@ -629,7 +691,7 @@ class TakConnectActivity : AppCompatActivity() {
      * carried a line that outlived what it described.
      *
      * What a pilot needs before a flight is WHO this aircraft is signed in as and WHO can see
-     * it. Everything that changes those answers is one tap away in [TakServerActivity].
+     * it. Everything that changes those answers is in [TakServerPanel], below the summary.
      */
     private fun paintTakSummary() {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -643,12 +705,12 @@ class TakConnectActivity : AppCompatActivity() {
         when {
             tm.isConnected -> {
                 statusLine.text = "Connected as \"$user\"" +
-                    if (callsign.isNotEmpty()) " — the aircraft is \"$callsign\"." else "."
+                    if (callsign.isNotEmpty()) ". The aircraft callsign is \"$callsign\"." else "."
                 statusLine.setTextColor(androidx.core.content.ContextCompat.getColor(
                     applicationContext, R.color.tp_state_go))
             }
             user.isEmpty() -> {
-                statusLine.text = "No TAK server is set up. Touch Configure TAK Server."
+                statusLine.text = "No TAK server is set up. Type the server settings below."
                 statusLine.setTextColor(androidx.core.content.ContextCompat.getColor(
                     applicationContext, R.color.tp_text_secondary))
             }
@@ -670,7 +732,7 @@ class TakConnectActivity : AppCompatActivity() {
                 val active = chans.filter { it.active }
                 channelLine.text = when {
                     chans.isEmpty() -> "This server has no channels."
-                    active.isEmpty() -> "No channel is active — nobody receives this aircraft."
+                    active.isEmpty() -> "No channel is active. Nobody receives this aircraft."
                     else -> "Active: " +
                         active.joinToString(", ") { TakMissionManager.channelLabel(it) }
                 }
@@ -689,20 +751,20 @@ class TakConnectActivity : AppCompatActivity() {
             // keyed off the saved certificates: those survive the switch to Basic on purpose (the
             // mode is a mute, not a removal), so a summary that read them would promise a split
             // that AppModeTransition has already torn down.
-            elevatedLine.text = "One TAK account — every active channel receives this aircraft" +
+            elevatedLine.text = "One TAK account. Every active channel receives this aircraft" +
                 if (advertised) " and its video." else ". $noAdvert"
         } else if (enrolled && !prefs.getBoolean(KEY_CHB_ENABLED, false)) {
             // ⚠ An enrolled account that is merely switched off is NOT "no Elevated account". A
             // pilot reading that would go looking to enroll one.
-            elevatedLine.text = if (advertised) "Elevated account switched off — the video link " +
-                "goes to every active channel." else "Elevated account switched off. $noAdvert"
+            elevatedLine.text = if (advertised) "The Elevated account is off. The video link " +
+                "goes to every active channel." else "The Elevated account is off. $noAdvert"
         } else if (enrolled) {
             elevatedLine.text = "Elevated account: reading the channels…"
             TakMissionManager.listElevatedChannels(this) { chans ->
                 val active = chans?.filter { it.active }.orEmpty()
                 elevatedLine.text = when {
-                    active.isEmpty() -> "Elevated account: no active channel — the video link " +
-                        "reaches nobody."
+                    active.isEmpty() -> "Elevated account: no channel is active. Nobody gets " +
+                        "the video link."
                     advertised -> "Video link on: " +
                         active.joinToString(", ") { TakMissionManager.channelLabel(it) }
                     else -> "Elevated account on: " +
@@ -714,8 +776,8 @@ class TakConnectActivity : AppCompatActivity() {
             // No second account. Say what that MEANS rather than leaving a blank: with no
             // split, the video link rides the Standard connection and everybody in its
             // channels can play it.
-            elevatedLine.text = if (advertised) "No Elevated account — the video link goes to " +
-                "every active channel." else "No Elevated account. $noAdvert"
+            elevatedLine.text = if (advertised) "No Elevated account is set up. The video link goes to " +
+                "every active channel." else "No Elevated account is set up. $noAdvert"
         }
     }
 
@@ -737,6 +799,101 @@ class TakConnectActivity : AppCompatActivity() {
     }
 
     // ---- 1. Aircraft Settings ----
+
+    /** True while the last tick saw an aircraft. A new connection reads the values once. */
+    private var aircraftSeen = false
+
+    /** Asks the aircraft for the values under the fields. Reads only, one-shot getters — see
+     *  [FlightLimitsController.readAircraft]. */
+    private fun readAircraftValues() {
+        renderAircraftValues()
+        if (AutelProductHolder.evo2 != null) {
+            FlightLimitsController.readAircraft { if (!isDestroyed) renderAircraftValues() }
+        }
+    }
+
+    /**
+     * WHICH AIRCRAFT THESE SETTINGS GO TO (design decision). From
+     * the product the SDK holds, as the Home screen reads it.
+     *
+     * ⚠ AN AIRCRAFT THAT CONNECTS WHILE THIS SCREEN SHOWS IS READ ONE TIME, on the edge. The
+     * tick that calls this is a read tick; it never asks the aircraft again while it stays.
+     */
+    private fun renderAircraftLine() {
+        val line = findViewById<TextView>(R.id.pfAircraftLine) ?: return
+        val product = AutelProductHolder.product
+        if (product == null) {
+            line.text = "No aircraft is connected. The settings are saved. The app sends them " +
+                "when the aircraft connects."
+            line.setTextColor(androidx.core.content.ContextCompat.getColor(
+                applicationContext, R.color.tp_text_secondary))
+        } else {
+            line.text = "${product.type} connected."
+            line.setTextColor(androidx.core.content.ContextCompat.getColor(
+                applicationContext, R.color.tp_state_go_soft))
+        }
+        val now = AutelProductHolder.evo2 != null
+        if (now && !aircraftSeen) readAircraftValues()
+        if (!now && aircraftSeen) renderAircraftValues()
+        aircraftSeen = now
+    }
+
+    /**
+     * THE AIRCRAFT'S VALUE UNDER EACH FIELD (design decision).
+     *
+     * The colour gives the comparison:
+     *  - green: the aircraft holds what the field says;
+     *  - amber, with the word DIFFERENT: it holds another value. The colour alone is not
+     *    enough in sunlight;
+     *  - grey dash: the aircraft did not answer. ⚠ Unknown is its own state, never "same".
+     *
+     * An EMPTY field means "leave the aircraft's value alone", so its line is not compared: it
+     * states the value in the plain colour. Called after every read and every edit, so the
+     * comparison follows the typing.
+     */
+    private fun renderAircraftValues() {
+        val f = FlightLimitsController
+        fun paint(id: Int, prefix: String, value: String?, same: Boolean?) {
+            val line = findViewById<TextView>(id) ?: return
+            line.text = when {
+                value == null -> "$prefix: —"
+                same == false -> "$prefix: $value. DIFFERENT."
+                else -> "$prefix: $value"
+            }
+            line.setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext, when {
+                value == null -> R.color.tp_text_tertiary
+                same == true -> R.color.tp_state_go_soft
+                same == false -> R.color.tp_state_caution
+                else -> R.color.tp_text_secondary
+            }))
+        }
+        // The fields take feet and the aircraft holds metres. The comparison is in METRES, the
+        // unit that is sent, so a rounding in the feet shown cannot make a false DIFFERENT.
+        fun limit(lineId: Int, fieldId: Int, aircraftM: Float?) {
+            val typedM = f.ftToM(findViewById<EditText>(fieldId).text.toString())
+            val heldM = aircraftM?.let { Math.round(it) }
+            paint(lineId, "Aircraft", aircraftM?.let { "${Math.round(it * 3.28084)} ft" },
+                if (heldM == null || typedM == null) null else typedM == heldM)
+        }
+        limit(R.id.limitMaxAltitudeAircraft, R.id.limitMaxAltitude, f.aircraftMaxAltM)
+        limit(R.id.limitMaxRadiusAircraft, R.id.limitMaxRadius, f.aircraftMaxRangeM)
+        limit(R.id.limitRthAltitudeAircraft, R.id.limitRthAltitude, f.aircraftReturnHeightM)
+
+        fun percent(lineId: Int, fieldId: Int, aircraftPct: Float?) {
+            val typed = findViewById<EditText>(fieldId).text.toString().trim().toIntOrNull()
+            val held = aircraftPct?.let { Math.round(it) }
+            paint(lineId, "Aircraft", held?.let { "$it%" },
+                if (held == null || typed == null) null else typed == held)
+        }
+        percent(R.id.limitLowBatteryAircraft, R.id.limitLowBattery, f.aircraftWarningPct)
+        percent(R.id.limitCriticalBatteryAircraft, R.id.limitCriticalBattery, f.aircraftCriticalPct)
+
+        // The stick mode is the CONTROLLER'S, so its line says so.
+        val stick = AutelControlRates.stickMode
+        val chosen = AutelControlRates.savedStickModeId(this)
+        paint(R.id.stickModeStatus, "Controller", stick?.let { AutelControlRates.stickModeLabel() },
+            if (stick == null || chosen.isEmpty()) null else AutelControlRates.idFor(stick) == chosen)
+    }
 
     /**
      * Flight-safety limits, persisted here and pushed to the aircraft by
@@ -795,7 +952,7 @@ class TakConnectActivity : AppCompatActivity() {
     private fun applyAllToAircraft(button: Button, progress: android.widget.ProgressBar, status: TextView) {
         if (AutelProductHolder.evo2 == null) {
             status.text = "The aircraft is not connected. The settings are saved. " +
-                "Connect the aircraft, then press the button again."
+                "Connect the aircraft, then touch the button again."
             status.setTextColor(androidx.core.content.ContextCompat.getColor(
                 this, R.color.tp_state_caution))
             return
@@ -867,6 +1024,12 @@ class TakConnectActivity : AppCompatActivity() {
                             FlightLimitsController.ReportState.UNKNOWN -> R.color.tp_state_unknown
                             FlightLimitsController.ReportState.PROBLEM -> R.color.tp_state_danger
                         }))
+                    renderAircraftValues()
+                    // The read-back covers the three limits. The battery levels are read now,
+                    // so their lines show what the Apply left in the aircraft.
+                    FlightLimitsController.readAircraft(limits = false) {
+                        if (!isDestroyed) renderAircraftValues()
+                    }
                 }
             }
         }
@@ -917,12 +1080,12 @@ class TakConnectActivity : AppCompatActivity() {
                 }
                 check("Max altitude", maxAlt.text.toString(), alt)
                 check("Max distance", maxRadius.text.toString(), rad)
-                check("RTH altitude", rthAlt.text.toString(), rth)
+                check("Return-home altitude", rthAlt.text.toString(), rth)
                 if (problems.isEmpty()) {
                     rangeStatus.setText("The aircraft accepts: " +
                         (alt?.let { "max altitude ${it.fromFt} to ${it.toFt} ft, " } ?: "") +
                         (rad?.let { "max distance ${it.fromFt} to ${it.toFt} ft, " } ?: "") +
-                        (rth?.let { "RTH altitude ${it.fromFt} to ${it.toFt} ft" } ?: ""))
+                        (rth?.let { "return-home altitude ${it.fromFt} to ${it.toFt} ft" } ?: ""))
                     rangeStatus.setTextColor(0xFF909090.toInt())
                 } else {
                     rangeStatus.setText("⚠ The aircraft will refuse " + problems.joinToString("; ") +
@@ -939,6 +1102,7 @@ class TakConnectActivity : AppCompatActivity() {
             override fun afterTextChanged(s: android.text.Editable?) {
                 save()
                 refreshRanges()
+                renderAircraftValues()
             }
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -949,9 +1113,13 @@ class TakConnectActivity : AppCompatActivity() {
 
         val applyStatus = findViewById<TextView>(R.id.limitApplyStatus)
         val applyProgress = findViewById<android.widget.ProgressBar>(R.id.limitApplyProgress)
-        val applyButton = findViewById<Button>(R.id.limitApplyButton)
-        applyButton.setOnClickListener {
-            applyAllToAircraft(applyButton, applyProgress, applyStatus)
+        // ONE BUTTON (design decision). A second one at the top of the Aircraft group was
+        // tried while Apply was below the fold. With Memory Card in its own
+        // group, Apply is on the screen when the Aircraft group opens, so the top one went.
+        val apply = findViewById<Button>(R.id.limitApplyButton)
+        apply.setOnClickListener {
+            AppLog.v(TAG, "tap: Apply to Aircraft")
+            applyAllToAircraft(apply, applyProgress, applyStatus)
         }
 
 
@@ -988,7 +1156,7 @@ class TakConnectActivity : AppCompatActivity() {
                     status.setTextColor(0xFF909090.toInt())
                 }
                 l <= c -> {
-                    status.setText("⚠ Battery Warning ($l%) must be above Battery Critical " +
+                    status.setText("⚠ Battery Warning ($l%) must be higher than Battery Critical " +
                         "($c%) — the aircraft would act on both at once. Not sent until corrected.")
                     status.setTextColor(0xFFFF6B6B.toInt())
                 }
@@ -1005,6 +1173,7 @@ class TakConnectActivity : AppCompatActivity() {
                     this@TakConnectActivity, low.text.toString(), crit.text.toString(),
                 )
                 refresh()
+                renderAircraftValues()
             }
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -1024,20 +1193,18 @@ class TakConnectActivity : AppCompatActivity() {
      * a pilot must not be fighting a lock.
      */
     /**
-     * ⚠ **THE TAK LOCK IS NOT ON THIS SCREEN ANY MORE.** It went with the fields it guards, to
-     * [TakServerActivity], and its field list is there. Nothing of the
-     * TAK configuration stayed here, so there is nothing left for a lock to protect. The VIDEO
-     * lock DID stay, because the active-server toggle it also guards stayed.
+     * ⚠ **THE TAK LOCK IS INSTALLED BY [TakServerPanel]**, with its field list, when it is
+     * bound. Its box is in the TAK group's title row on this screen.
      */
     /** Codec and transport are part of WHAT the stream is — the wrong codec breaks playback
      *  outright (CloudTAK cannot play H.265), so they lock with the server fields. The quality profile stays live; see [setupConfigLocks]. The two codec
      *  RadioButtons are listed individually because disabling a RadioGroup does not disable its
      *  children. */
     /**
-     * ⚠ EMPTY ON PURPOSE. The video configuration fields are in [VideoServersActivity],
-     * so there is nothing on THIS screen for the generic lock to
-     * disable. The lock still does its two jobs: `afterChange` stops the active-server toggle
-     * taking touches, and the servers screen reads `video_config_locked` when it opens.
+     * ⚠ EMPTY ON PURPOSE. The video configuration fields are in [VideoServersPanel], which
+     * locks its own cards in place: the generic lock would dim them, and locked is not dimmed.
+     * The lock does its two jobs in `afterChange`: the active-server toggle stops taking
+     * touches, and the panel locks its cards.
      */
     private val videoLockedFields = emptyList<Int>()
 
@@ -1062,28 +1229,33 @@ class TakConnectActivity : AppCompatActivity() {
      * against.
      */
     private fun setupConfigLocks() {
-        // ⚠ The TAK lock is NOT here — it is with the fields it guards, in
-        // TakServerActivity.
+        // The TAK lock is installed by TakServerPanel.bind, with the fields it guards.
         ConfigLock.install(
             this, R.id.videoLockConfig, KEY_VIDEO_LOCKED, videoLockedFields,
             "Unlock video server settings?",
-            "These fields are locked so a working stream configuration is not changed by " +
-                "accident. Editing them can stop your team seeing the video.",
+            "The lock prevents an accidental change to video settings that work. " +
+                "A wrong setting can stop the video to your team.",
             // The toggle is a radio button pair built in the layout, but it must not be dimmed
-            // — see the note on videoLockedFields.
-            afterChange = { lockVideoServerToggle(it) },
+            // — see the note on videoLockedFields. The server cards are on this page now, and
+            // they lock and unlock in place.
+            afterChange = {
+                lockVideoServerToggle(it)
+                videoPanel.applyLock(it)
+            },
         )
         ConfigLock.install(
             this, R.id.limitBatteryLock, KEY_BATTERY_LOCKED, batteryLockedFields,
             "Unlock battery levels?",
-            "These are the levels at which the aircraft returns and lands on its own. " +
-                "A wrong value can force a landing away from the pilot.",
+            // ⚠ NOT "lands by itself": on the EVO II, Critical starts a RETURN
+            // HOME (FlightLimitsController.savedLowBatteryPct).
+            "These levels set when the aircraft warns you and when it returns home by itself. " +
+                "A wrong level can make the aircraft come home too late.",
         )
     }
 
     /**
      * ⚠ **ONE IMPLEMENTATION, IN [ConfigLock].** The two private methods that
-     * used to live here — `setupOneLock` and `applyLock` — moved there when [TakServerActivity]
+     * used to live here — `setupOneLock` and `applyLock` — moved there when [TakServerPanel]
      * took the TAK configuration and needed the same lock. Copying them was the obvious move
      * and the wrong one: both of their rules — locked is not hidden, and a control whose state
      * IS its tick must not be dimmed — came from real faults, and a copy is how one screen
@@ -1109,20 +1281,13 @@ class TakConnectActivity : AppCompatActivity() {
             }
             startActivityForResult(intent, REQUEST_CODE_DTED_PICK)
         }
-        findViewById<Button>(R.id.dtedCleanButton).setOnClickListener {
-            AppLog.v(TAG, "tap: Clean Unused Tiles")
-            if (DtedStore.isImportRunning) {
-                Toast.makeText(this, "Wait for the import to finish.", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val removed = DtedStore.cleanUnreferencedTiles(this)
-            Toast.makeText(this, "Removed $removed unreferenced tile file(s)", Toast.LENGTH_SHORT).show()
-        }
+        // "Clean Unused Tiles" is gone (design decision). The clean
+        // runs after a region Delete, which is the one action that leaves files no region uses.
         renderDtedRegions()
     }
 
     /**
-     * Import, Clean and Delete follow [DtedStore.isImportRunning], not a button's own state:
+     * Import and Delete follow [DtedStore.isImportRunning], not a button's own state:
      * this screen can be rebuilt during an import (re-opened, or the
      * mode-change rebuild), and the new instance must still hold them down. While an import
      * runs, this re-checks every 2 s and repaints the list when it ends.
@@ -1130,7 +1295,6 @@ class TakConnectActivity : AppCompatActivity() {
     private fun applyDtedBusy() {
         val busy = DtedStore.isImportRunning
         findViewById<Button>(R.id.dtedUploadButton)?.isEnabled = !busy
-        findViewById<Button>(R.id.dtedCleanButton)?.isEnabled = !busy
         if (busy) {
             findViewById<TextView>(R.id.dtedStatus)?.let {
                 if (!it.text.startsWith("Importing")) it.text = "An import is running…"
@@ -1155,8 +1319,8 @@ class TakConnectActivity : AppCompatActivity() {
         container.orientation = LinearLayout.VERTICAL
         container.removeAllViews()
         val regions = DtedStore.listRegions(this)
-        dtedStatus.text = if (regions.isEmpty()) "No terrain areas are imported."
-            else "${regions.size} terrain area(s) imported."
+        dtedStatus.text = if (regions.isEmpty()) "No terrain region is imported."
+            else "Terrain regions imported: ${regions.size}."
         val busy = DtedStore.isImportRunning
         for (region in regions) {
             val row = LinearLayout(this).apply {
@@ -1182,7 +1346,7 @@ class TakConnectActivity : AppCompatActivity() {
                 val mb = region.totalBytes / 1024.0 / 1024.0
                 val sizeStr = if (mb >= 1024) "%.1f GB".format(mb / 1024.0) else "%.0f MB".format(mb)
                 text = "Imported ${dtedDateFormat.format(java.util.Date(region.importedAtMs))} · " +
-                    "${region.fileCount} file(s) · $sizeStr"
+                    "${region.fileCount} files · $sizeStr"
                 setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_tertiary))
                 textSize = 12f
             })
@@ -1202,11 +1366,18 @@ class TakConnectActivity : AppCompatActivity() {
                     val size = if (mb >= 1024) "%.1f GB".format(mb / 1024.0) else "%.0f MB".format(mb)
                     android.app.AlertDialog.Builder(this@TakConnectActivity, R.style.TakDialogTheme_Destructive)
                         .setTitle("Delete ${region.name}?")
-                        .setMessage("${region.fileCount} file(s), $size. To get it back you must import it again, which takes several minutes.")
+                        .setMessage("${region.fileCount} files, $size. To get it back, you must import it again. That takes several minutes.")
                         .setPositiveButton("Delete") { _, _ ->
                             if (!DtedStore.deleteRegion(this@TakConnectActivity, region)) {
                                 Toast.makeText(this@TakConnectActivity,
                                     "Wait for the import to finish.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                // The clean that "Clean Unused Tiles" did, after the one action
+                                // that leaves unused files. NOT while an import runs: its tiles
+                                // have no region until it ends, and cleanUnreferencedTiles
+                                // refuses then by itself.
+                                val removed = DtedStore.cleanUnreferencedTiles(this@TakConnectActivity)
+                                if (removed > 0) AppLog.i(TAG, "removed $removed terrain files that no region uses")
                             }
                             renderDtedRegions()
                         }
@@ -1231,20 +1402,19 @@ class TakConnectActivity : AppCompatActivity() {
         // see DtedStore.importAsync. The button is held down for the duration: a second
         // import into the same shared pool while one is running has no defined outcome.
         importButton?.isEnabled = false
-        findViewById<Button>(R.id.dtedCleanButton)?.isEnabled = false
         dtedStatus.text = "Importing $name…"
         DtedStore.importAsync(
             applicationContext, uri, name,
             // The count climbs as tiles land, so a working import cannot be mistaken for a
             // dead screen — which is exactly how the fault presented.
-            onProgress = { tiles -> dtedStatus.text = "Importing $name… $tiles tile(s)" },
+            onProgress = { tiles -> dtedStatus.text = "Importing $name… $tiles files" },
         ) { result ->
             dtedStatus.text = when {
                 result.error != null && result.importedCount == 0 ->
                     "The app cannot import $name. ${result.error}"
                 result.error != null ->
-                    "Imported ${result.importedCount} tile(s) from $name. ${result.error}"
-                else -> "Imported ${result.importedCount} tile(s) from $name."
+                    "Imported ${result.importedCount} files from $name. ${result.error}"
+                else -> "Imported ${result.importedCount} files from $name."
             }
             if (result.importedCount == 0) {
                 Toast.makeText(this, dtedStatus.text, Toast.LENGTH_SHORT).show()
@@ -1274,7 +1444,6 @@ class TakConnectActivity : AppCompatActivity() {
         val radiusField = findViewById<EditText>(R.id.uasfmRadius)
         val uasfmStatus = findViewById<TextView>(R.id.uasfmStatus)
         val downloadBtn = findViewById<Button>(R.id.uasfmDownloadButton)
-        val checkBtn = findViewById<Button>(R.id.uasfmCheckButton)
 
         radiusField.setText("50")
         renderUasfmStatus()
@@ -1285,11 +1454,11 @@ class TakConnectActivity : AppCompatActivity() {
             val lon = lonField.text.toString().trim().toDoubleOrNull()
             val radius = radiusField.text.toString().trim().toDoubleOrNull()
             if (lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
-                Toast.makeText(this, "Enter a valid centre latitude and longitude", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Type a correct center latitude and longitude.", Toast.LENGTH_SHORT).show()
                 return null
             }
             if (radius == null || radius <= 0 || radius > 500) {
-                Toast.makeText(this, "Enter a radius between 1 and 500 miles", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Type a radius from 1 to 500 miles.", Toast.LENGTH_SHORT).show()
                 return null
             }
             return UasfmStore.bboxAround(lat, lon, radius)
@@ -1306,21 +1475,11 @@ class TakConnectActivity : AppCompatActivity() {
             useMyLocationFor(R.id.uasfmLat, R.id.uasfmLon)
         }
 
-        checkBtn.setOnClickListener {
-            val bbox = readBbox() ?: return@setOnClickListener
-            AppLog.v(TAG, "tap: UASFM Check Size")
-            checkBtn.isEnabled = false
-            uasfmStatus.text = "Checking…"
-            UasfmStore.countAsync(bbox) { result ->
-                checkBtn.isEnabled = true
-                uasfmStatus.text = when {
-                    result.error != null -> "The app cannot reach the FAA service. ${result.error}"
-                    result.count == 0 ->
-                        "There are no FAA cells in this area. The Part 107 limit of 400 ft applies."
-                    else -> "${result.count} cell(s) in this area. Press Download to keep them."
-                }
-            }
-        }
+        // "Check Size" is gone (design decision). The download
+        // shows the count as it runs. An area with no FAA data is REFUSED by the download, which
+        // keeps the data already there, and its message says why (UasfmStore.doDownload).
+        // ⚠ Storing such an area would replace the old data with nothing; this app
+        // does not, on purpose.
 
         downloadBtn.setOnClickListener {
             val bbox = readBbox() ?: return@setOnClickListener
@@ -1336,7 +1495,7 @@ class TakConnectActivity : AppCompatActivity() {
                 context = this,
                 bbox = bbox,
                 areaLabel = label,
-                onProgress = { count -> uasfmStatus.text = "Downloading… $count cell(s)" },
+                onProgress = { count -> uasfmStatus.text = "Downloading… $count map squares" },
                 onDone = { result ->
                     downloadBtn.isEnabled = true
                     if (result.error != null) {
@@ -1347,7 +1506,7 @@ class TakConnectActivity : AppCompatActivity() {
                         // the FAA moved off the 1/120 degree grid this design assumes, and the
                         // pilot would otherwise have coverage holes with no hint why.
                         val warn = if (result.offGridSkipped > 0)
-                            "\n⚠ ${result.offGridSkipped} cell(s) skipped — unexpected grid, report this."
+                            "\n⚠ ${result.offGridSkipped} map squares were skipped: the FAA data has a different grid. Report this."
                         else ""
                         renderUasfmStatus(extra = warn)
                         Toast.makeText(this, "FAA ceilings downloaded", Toast.LENGTH_SHORT).show()
@@ -1358,19 +1517,308 @@ class TakConnectActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.uasfmClearButton).setOnClickListener {
             AppLog.v(TAG, "tap: UASFM Clear Data")
-            UasfmStore.clear(this)
-            renderUasfmStatus()
-            Toast.makeText(this, "FAA ceiling data cleared", Toast.LENGTH_SHORT).show()
+            // Every action that removes data asks first (design decision). The terrain
+            // region Delete and Format already did.
+            android.app.AlertDialog.Builder(this, R.style.TakDialogTheme_Destructive)
+                .setTitle("Clear the FAA ceiling data?")
+                .setMessage("This removes the downloaded ceilings from this controller. The " +
+                    "flight screen then shows the 400 ft limit of Part 107. You need Wi-Fi to " +
+                    "download them again.")
+                .setPositiveButton("Clear Data") { _, _ ->
+                    UasfmStore.clear(this)
+                    renderUasfmStatus()
+                    Toast.makeText(this, "FAA ceiling data cleared", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
+    }
+
+    /**
+     * MAP DISPLAY: the source of the small map on the flight screen (design decision). The
+     * rules are in [MapSource].
+     *
+     * STREET AND HYBRID SAVE WHEN THEY ARE TOUCHED. CUSTOM needs an address: the field and its
+     * button show only while Custom is selected, and the address is checked BEFORE it is saved
+     * (without the check, an http:// address, or one with no {z}/{x}/{y}, saved without a word
+     * and then showed a blank map). A touch on Custom with a good address already in the field
+     * saves at once. With no good address, Custom is NOT saved until the button is touched, and
+     * the line says so.
+     */
+    private fun setupMapDisplay() {
+        val group = findViewById<android.widget.RadioGroup>(R.id.mapStyleGroup)
+        val customUrl = findViewById<EditText>(R.id.mapCustomUrl)
+        val block = findViewById<android.view.View>(R.id.mapCustomBlock)
+        val status = findViewById<TextView>(R.id.mapStatus)
+
+        fun say(text: String, problem: Boolean = false) {
+            status.text = text
+            status.setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext,
+                if (problem) R.color.tp_state_caution else R.color.tp_text_secondary))
+        }
+        fun saveCustom(): Boolean {
+            val problem = MapSource.validateCustomUrl(customUrl.text.toString())
+            if (problem != null) {
+                say("Custom is not saved. $problem", problem = true)
+                return false
+            }
+            MapSource.save(this, MapSource.CUSTOM, customUrl.text.toString())
+            AppLog.i(TAG, "map display -> custom")
+            say("Saved: Custom.")
+            return true
+        }
+
+        // Fill BEFORE the listener is attached, so the fill is not taken for a touch.
+        val saved = MapSource.savedChoice(this)
+        group.check(when (saved) {
+            MapSource.HYBRID -> R.id.mapStyleHybrid
+            MapSource.CUSTOM -> R.id.mapStyleCustom
+            else -> R.id.mapStyleStreet
+        })
+        customUrl.setText(MapSource.savedCustomUrl(this))
+        block.visibility = if (saved == MapSource.CUSTOM) android.view.View.VISIBLE
+            else android.view.View.GONE
+        say("")
+
+        group.setOnCheckedChangeListener { _, id ->
+            block.visibility = if (id == R.id.mapStyleCustom) android.view.View.VISIBLE
+                else android.view.View.GONE
+            when (id) {
+                // The saved address stays as it is: a half-typed one is not written.
+                R.id.mapStyleStreet -> {
+                    MapSource.save(this, MapSource.STREET, MapSource.savedCustomUrl(this))
+                    AppLog.i(TAG, "map display -> street")
+                    say("Saved: Street.")
+                }
+                R.id.mapStyleHybrid -> {
+                    MapSource.save(this, MapSource.HYBRID, MapSource.savedCustomUrl(this))
+                    AppLog.i(TAG, "map display -> hybrid")
+                    say("Saved: Hybrid.")
+                }
+                else -> if (MapSource.validateCustomUrl(customUrl.text.toString()) == null) {
+                    saveCustom()
+                } else {
+                    say("Custom is not saved yet. Type the address of your map server, " +
+                        "then touch Save Map Address.", problem = true)
+                }
+            }
+        }
+
+        findViewById<Button>(R.id.mapDisplaySaveButton).setOnClickListener {
+            AppLog.v(TAG, "tap: Save Map Address")
+            saveCustom()
+            renderMapDownload()
+        }
+        setupMapDownload()
+    }
+
+    /** This instance's callback for the map download, kept so onDestroy clears only its own. */
+    private var mapDownloadCb: (() -> Unit)? = null
+
+    /**
+     * OFFLINE MAP: the custom map of a circle, saved on the controller (design decision).
+     * The rules and the arithmetic are in
+     * [CustomMapTiles]; the flight map reads the files through [SavedMapTiles].
+     *
+     * The download runs on with this screen closed, so the screen reads the state of the
+     * download each time it is shown and does not keep a copy.
+     */
+    private fun setupMapDownload() {
+        val tiles = CustomMapTiles
+        val nameField = findViewById<EditText>(R.id.mapDlName)
+        val latField = findViewById<EditText>(R.id.mapDlLat)
+        val lonField = findViewById<EditText>(R.id.mapDlLon)
+        val radiusField = findViewById<EditText>(R.id.mapDlRadius)
+        val download = findViewById<Button>(R.id.mapDlDownload)
+        radiusField.setText("10")
+
+        findViewById<Button>(R.id.mapDlUseLocation).setOnClickListener {
+            AppLog.v(TAG, "tap: Offline Map Use My Location")
+            // The same path as the FAA Ceilings button: it asks for the location permission
+            // when the app does not have it yet.
+            useMyLocationFor(R.id.mapDlLat, R.id.mapDlLon)
+        }
+
+        download.setOnClickListener {
+            if (tiles.running) {
+                AppLog.v(TAG, "tap: Stop Download")
+                tiles.stop()
+                return@setOnClickListener
+            }
+            AppLog.v(TAG, "tap: Download Map")
+            // The download uses the SAVED address. An address that is typed and not saved is
+            // not the map on the flight screen, and its tiles would not show there.
+            val address = MapSource.savedCustomUrl(this)
+            if (MapSource.savedChoice(this) != MapSource.CUSTOM ||
+                MapSource.validateCustomUrl(address) != null ||
+                address != findViewById<EditText>(R.id.mapCustomUrl).text.toString().trim()) {
+                mapDownloadSay("Touch Save Map Address first.", problem = true)
+                return@setOnClickListener
+            }
+            val name = nameField.text.toString().trim()
+            if (name.isEmpty()) {
+                mapDownloadSay("Type a name for the area.", problem = true)
+                return@setOnClickListener
+            }
+            val lat = latField.text.toString().trim().toDoubleOrNull()
+            val lon = lonField.text.toString().trim().toDoubleOrNull()
+            val radius = radiusField.text.toString().trim().toDoubleOrNull()
+            if (lat == null || lon == null || lat !in -85.0..85.0 || lon !in -180.0..180.0) {
+                mapDownloadSay("Type a correct center latitude and longitude.", problem = true)
+                return@setOnClickListener
+            }
+            if (radius == null || radius <= 0 || radius > tiles.MAX_RADIUS_MI) {
+                mapDownloadSay("Type a radius from 1 to 15 miles.", problem = true)
+                return@setOnClickListener
+            }
+            mapDownloadSay("Asking the server…")
+            tiles.download(this, address, name, lat, lon, radius) { result ->
+                if (!isDestroyed) renderMapDownload(result)
+            }
+            renderMapDownload()
+        }
+
+        mapDownloadCb = { if (!isDestroyed) renderMapDownload() }
+        tiles.onChanged = mapDownloadCb
+        renderMapDownload()
+    }
+
+    /**
+     * One row for each downloaded area: the name, then the radius, the date, the count and
+     * the size, and Delete. The same row as a terrain region, built the same way.
+     */
+    private fun renderMapAreas() {
+        val tiles = CustomMapTiles
+        val container = findViewById<LinearLayout>(R.id.mapDlList) ?: return
+        container.removeAllViews()
+        for (area in tiles.areas(this)) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setBackgroundColor(androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_surface_dialog))
+                setPadding(12, 10, 12, 10)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = 6 }
+            }
+            val info = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            info.addView(TextView(this).apply {
+                text = area.name
+                setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_primary))
+                textSize = 15f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            })
+            info.addView(TextView(this).apply {
+                val radius = if (area.radiusMi == Math.floor(area.radiusMi))
+                    area.radiusMi.toInt().toString()
+                    else "%.1f".format(java.util.Locale.US, area.radiusMi)
+                text = "$radius mile radius · " +
+                    "Downloaded ${dtedDateFormat.format(java.util.Date(area.timeMs))} · " +
+                    "${area.count} map pieces · ${mapSize(area.bytes)}"
+                setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_text_tertiary))
+                textSize = 12f
+            })
+            row.addView(info)
+            row.addView(TextView(this).apply {
+                text = "Delete"
+                setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext, R.color.tp_btn_danger_dialog))
+                textSize = 13f
+                setPadding(20, 8, 4, 8)
+                setOnClickListener {
+                    AppLog.v(TAG, "tap: delete offline map area #${area.id}")
+                    // ⚠ NOT WHILE A DOWNLOAD RUNS: the delete removes the files that no area
+                    // in the list uses, and the files of a download are not in the list yet.
+                    if (tiles.running) {
+                        mapDownloadSay("Stop the download first.", problem = true)
+                        return@setOnClickListener
+                    }
+                    android.app.AlertDialog.Builder(
+                        this@TakConnectActivity, R.style.TakDialogTheme_Destructive)
+                        .setTitle("Delete this offline map area?")
+                        .setMessage("\"${area.name}\" is removed from this controller. With " +
+                            "no network, the flight screen then shows no map for that area. " +
+                            "You need Wi-Fi to download it again.")
+                        .setPositiveButton("Delete") { _, _ ->
+                            mapDownloadSay("Deleting \"${area.name}\"…")
+                            tiles.deleteArea(this@TakConnectActivity, area.id) {
+                                if (!isDestroyed) renderMapDownload()
+                            }
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            })
+            container.addView(row)
+        }
+    }
+
+    private fun mapDownloadSay(text: String, problem: Boolean = false) {
+        findViewById<TextView>(R.id.mapDlStatus)?.apply {
+            this.text = text
+            setTextColor(androidx.core.content.ContextCompat.getColor(applicationContext,
+                if (problem) R.color.tp_state_caution else R.color.tp_text_secondary))
+        }
+    }
+
+    /** Megabytes below one gigabyte, gigabytes above. */
+    private fun mapSize(bytes: Long): String {
+        val mb = bytes / 1024.0 / 1024.0
+        return if (mb >= 1024) "%.1f GB".format(java.util.Locale.US, mb / 1024.0)
+            else "%.0f MB".format(java.util.Locale.US, mb)
+    }
+
+    /**
+     * The Offline Map line and its button, from the state of the download. [result] is given
+     * one time, when a download ends.
+     */
+    private fun renderMapDownload(result: CustomMapTiles.Result? = null) {
+        val tiles = CustomMapTiles
+        val download = findViewById<Button>(R.id.mapDlDownload) ?: return
+        // A changing label is right for an action in progress, as on the Record button.
+        download.text = if (tiles.running) "Stop Download" else "Download Map"
+        if (tiles.running) {
+            val p = tiles.progress
+            mapDownloadSay(if (p == null) "Asking the server…"
+                else "Downloading… ${p.done} of ${p.total} map pieces, ${mapSize(p.bytes)}.")
+            return
+        }
+        renderMapAreas()
+        val count = tiles.areas(this).size
+        val forOtherAddress = count > 0 &&
+            tiles.savedTemplate(this) != MapSource.savedCustomUrl(this).trim()
+        val onController = when {
+            count == 0 -> "No offline map area is saved."
+            forOtherAddress -> "⚠ The saved areas are for a different map address, so the " +
+                "flight screen does not use them. The next download removes them."
+            else -> "Offline map areas saved: $count."
+        }
+        if (result == null) {
+            mapDownloadSay(onController)
+            return
+        }
+        val problem = result.error != null || result.failed > 0 || result.stoppedAtLimit
+        val what = when {
+            result.error != null -> result.error
+            result.stoppedByPilot -> "The download was stopped. The map pieces that came are saved."
+            result.stoppedAtLimit -> "The download stopped at the limit of 1 GB. " +
+                "The map pieces that came are saved. Use a smaller radius."
+            result.failed > 0 -> "The download is complete, but ${result.failed} map pieces did " +
+                "not come. Touch Download Map again to get them."
+            else -> "The download is complete."
+        }
+        mapDownloadSay("$what\n$onController", problem = problem)
     }
 
     private fun renderUasfmStatus(extra: String = "") {
         val uasfmStatus = findViewById<TextView>(R.id.uasfmStatus)
         val meta = UasfmStore.meta(this)
         uasfmStatus.text = if (meta == null) {
-            "No FAA data is downloaded. The flight screen shows the Part 107 limit of 400 ft."
+            "No FAA ceiling data is downloaded. The flight screen shows the 400 ft limit of Part 107."
         } else {
-            "${meta.cellCount} cell(s) for ${meta.areaLabel}\n" +
+            "Map squares: ${meta.cellCount}, for ${meta.areaLabel}\n" +
                 "Downloaded ${dtedDateFormat.format(java.util.Date(meta.downloadedAtMs))}  ·  " +
                 "FAA effective ${meta.effectiveLabel}$extra"
         }
@@ -1425,7 +1873,7 @@ class TakConnectActivity : AppCompatActivity() {
         if (loc == null) {
             Toast.makeText(
                 this,
-                "No position is available. Connect the aircraft, or type the centre.",
+                "No position is available. Connect the aircraft, or type the center.",
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -1467,7 +1915,7 @@ class TakConnectActivity : AppCompatActivity() {
             AppLog.i(TAG, "location permission denied — centre must be entered manually")
             Toast.makeText(
                 this,
-                "Location permission denied. Enter the centre latitude/longitude manually.",
+                "The app has no permission to read the location. Type the center latitude and longitude.",
                 Toast.LENGTH_LONG,
             ).show()
         }
@@ -1491,6 +1939,9 @@ class TakConnectActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "TakConnectActivity"
 
+        /** The rail group to show; kept in the intent so a rebuild returns to it. */
+        private const val EXTRA_RAIL_TAB = "pf_rail_tab"
+
         /** How long "Apply to aircraft" waits before reading back. Must clear the slowest write.
          *  Was 11s, set by the signal-loss write's 10s timeout; that write is gone (it set
          *  nothing) and the remaining ones acknowledge in well under a second — measured, the
@@ -1510,7 +1961,7 @@ class TakConnectActivity : AppCompatActivity() {
         internal const val KEY_BATTERY_LOCKED = "battery_levels_locked"
 
         // ⚠ ONLY WHAT THE SUMMARY READS. The rest of the TAK keys went to
-        // [TakServerActivity] with the fields that write them, and two
+        // [TakServerPanel] with the fields that write them, and two
         // copies of one key is the trap this file already names elsewhere. The preference FILE
         // is still the same one — nothing migrated.
         private const val KEY_USERNAME = "username"
@@ -1530,7 +1981,7 @@ class TakConnectActivity : AppCompatActivity() {
         // The plain transport, port-per-protocol and passphrase keys (video_transport,
         // video_rtsp_port, video_srt_port, video_srt_passphrase) and the video_adv_* set had
         // constants here for this screen's own copy of the mirror. That copy is gone — see
-        // VideoServersActivity.mirrorActiveSlot, which names every key it writes in one place.
+        // VideoServersPanel.mirrorActiveSlot, which names every key it writes in one place.
         // Do not reintroduce a second set of names for them here.
         private const val KEY_V_PROFILE = "video_profile"
         /** Must match the literal read in AutelVideoStreamer.startFromPrefs. */
@@ -1752,7 +2203,6 @@ class TakConnectActivity : AppCompatActivity() {
         val group = findViewById<android.widget.RadioGroup>(R.id.ratesGroup)
         val normal = findViewById<android.widget.RadioButton>(R.id.ratesNormal)
         val precision = findViewById<android.widget.RadioButton>(R.id.ratesPrecision)
-        val stick = findViewById<android.widget.TextView>(R.id.stickModeStatus)
 
         val stickGroup = findViewById<android.widget.RadioGroup>(R.id.stickModeGroup)
         val stickIds = mapOf("1" to R.id.stickMode1, "2" to R.id.stickMode2, "3" to R.id.stickMode3)
@@ -1769,8 +2219,8 @@ class TakConnectActivity : AppCompatActivity() {
             stickGroup.setOnCheckedChangeListener(null)
             stickIds[chosen]?.let { stickGroup.check(it) }
             stickIds.values.forEach { findViewById<android.widget.RadioButton>(it).isEnabled = connected }
-            stick.text = if (chosen.isEmpty()) "Waiting for the controller."
-                else "The controller reports ${AutelControlRates.stickModeLabel()}."
+            // The line under the radios is the CONTROLLER'S value, painted with the others.
+            renderAircraftValues()
             stickGroup.setOnCheckedChangeListener { _, id ->
                 val pick = stickIds.entries.firstOrNull { it.value == id }?.key ?: return@setOnCheckedChangeListener
                 AutelControlRates.saveStickModeId(this, pick)

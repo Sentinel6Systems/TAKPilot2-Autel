@@ -48,6 +48,11 @@
     <color name="tp_surface_guide_warn">#2A1616</color> <!-- field-guide warning callout background -->
     <color name="tp_border">#333333</color>        <!-- hairline borders / dim separators -->
     <color name="tp_divider">#33FFFFFF</color>     <!-- translucent-white divider -->
+    <!-- THE LEFT RAIL (Pre-Flight Setup, Field Guide), design decision: the rail on
+         tp_surface_card was the same grey as the page, so a pilot could take the rail for
+         the page and scroll the rail instead. The rail is darker than the page and has a light edge line. -->
+    <color name="tp_rail_bg">#0E0E10</color>       <!-- rail background, darker than tp_bg_screen -->
+    <color name="tp_rail_edge">#4A4A4A</color>     <!-- line between the rail and the page -->
 
     <!-- Text (a muted-grey scale, brightest first).
 

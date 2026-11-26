@@ -49,24 +49,24 @@ class CameraViewTest {
     }
 
     @Test
-    fun `a tap toggles visible and PIP, and from full thermal goes back to PIP`() {
-        assertEquals(CameraView.PIP, CameraView.VISIBLE.next)
+    fun `the IR pill toggles RGB and full IR, and from PIP goes back to RGB`() {
+        assertEquals(CameraView.IR, CameraView.VISIBLE.next)
+        assertEquals(CameraView.VISIBLE, CameraView.IR.next)
         assertEquals(CameraView.VISIBLE, CameraView.PIP.next)
-        assertEquals(CameraView.PIP, CameraView.IR.next)
     }
 
     @Test
-    fun `the window's corner control maximises and minimises, and is absent in visible`() {
-        assertEquals(CameraView.IR, CameraView.PIP.maximised)
-        assertEquals(CameraView.PIP, CameraView.IR.maximised)
-        assertEquals(null, CameraView.VISIBLE.maximised)
+    fun `the PIP pill shows only in thermal, enters PIP from IR and leaves it to IR`() {
+        assertEquals(CameraView.PIP, CameraView.IR.pipTarget)
+        assertEquals(CameraView.IR, CameraView.PIP.pipTarget)
+        assertEquals(null, CameraView.VISIBLE.pipTarget)
     }
 
     @Test
-    fun `the pill reads PIP unlit in visible and PIP lit in PIP and in full thermal`() {
-        assertEquals("PIP", CameraView.VISIBLE.label); assertFalse(CameraView.VISIBLE.active)
-        assertEquals("PIP", CameraView.PIP.label); assertTrue(CameraView.PIP.active)
-        assertEquals("PIP", CameraView.IR.label); assertTrue(CameraView.IR.active)
+    fun `the IR pill is lit in IR and PIP, the PIP pill in PIP only`() {
+        assertFalse(CameraView.VISIBLE.irLit); assertFalse(CameraView.VISIBLE.pipLit)
+        assertTrue(CameraView.IR.irLit); assertFalse(CameraView.IR.pipLit)
+        assertTrue(CameraView.PIP.irLit); assertTrue(CameraView.PIP.pipLit)
     }
 
     @Test

@@ -44,6 +44,10 @@ and so that it compiles with Kotlin 1.7.20. Changes, each marked `TAKPILOT2 CHAN
 - `CommandsManager`: the retransmit queue is bounded (2048 packets, oldest dropped first).
 - `Constants`: `MTU` 1500 -> 1316, because the library does not subtract the IP and UDP headers
   from it; a separate `READ_BUFFER` keeps the receive path at 1500 (`SrtSocket` uses it).
+- `MpegTsPacketizer` put the stuffing of a frame that fits in its first packet inside the
+  payload, so every small frame went out corrupt. The stuffing is now in that packet's
+  adaptation field (`Pes.HEADER_LENGTH` gives it the PES header size). `MpegTsPacketizerTest`
+  holds it.
 - `BitrateChecker` was a Java interface and is the same interface in Kotlin, so kapt can read it.
 - Seven enum files call `values()` in place of the Kotlin 1.9 `entries`.
 

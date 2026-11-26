@@ -28,6 +28,8 @@
 	     entry's comment. It was once hardcoded at the base bucket's
 	     144dp everywhere, ~50dp short of this bucket's real map edge. -->
 	<dimen name="flight_resource_row_margin_end">194dp</dimen>
+	<!-- flight_resource_row_margin_end + 6dp: see the base entry. -->
+	<dimen name="flight_antenna_arc_margin_end">200dp</dimen>
 
 	<!-- Readout column text (Clock / SPI overlay / gimbal pitch / FAA ceiling / RTH altitude).
 	     12sp is hard to read on the V3's real screen size at
